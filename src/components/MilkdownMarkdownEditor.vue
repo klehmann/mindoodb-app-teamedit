@@ -3,6 +3,8 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
 const props = defineProps<{
   modelValue: string;
+  onImageUpload?: (file: File) => Promise<string>;
+  resolveImageUrl?: (url: string) => Promise<string> | string;
 }>();
 
 const emit = defineEmits<{
@@ -29,6 +31,14 @@ async function createEditor() {
   editor = new Crepe({
     root: root.value,
     defaultValue: props.modelValue,
+    featureConfigs: {
+      [Crepe.Feature.ImageBlock]: {
+        // Crepe stores the returned URL in markdown. TeamEdit returns stable
+        // MindooDB attachment URLs here, not temporary object URLs.
+        onUpload: props.onImageUpload,
+        proxyDomURL: props.resolveImageUrl,
+      },
+    },
   });
   editor.on((listener: any) => {
     listener.markdownUpdated((_ctx: unknown, markdown: string) => {

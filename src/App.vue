@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import Dialog from "primevue/dialog";
 import Menubar from "primevue/menubar";
@@ -14,12 +14,21 @@ import {
   type MindooDBAppDatabaseInfo,
   type MindooDBAppDocument,
   type MindooDBAppDocumentSummary,
+  type MindooDBAppRuntime,
   type MindooDBAppSession,
   type MindooDBAppUiPreferences,
   type MindooDBTextBuffer,
 } from "mindoodb-app-sdk";
 
+import DocumentAttachmentsPanel from "@/components/DocumentAttachmentsPanel.vue";
 import MilkdownMarkdownEditor from "@/components/MilkdownMarkdownEditor.vue";
+import { useAttachmentImageResolver } from "@/composables/useAttachmentImageResolver";
+import { useDocumentAttachments } from "@/composables/useDocumentAttachments";
+import {
+  createAttachmentMarkdownUrl,
+  createUniqueImageAttachmentName,
+  uploadFileAttachment,
+} from "@/lib/attachmentImages";
 import { applyAppTheme } from "@/lib/theme";
 
 const markdownIt = new MarkdownIt({
@@ -27,6 +36,30 @@ const markdownIt = new MarkdownIt({
   linkify: true,
   typographer: true,
 });
+
+const PREVIEW_PANE_SETTINGS_KEY = "mindoodb-teamedit-preview-pane";
+
+type PreviewPanePosition = "right" | "bottom";
+
+function readPreviewPaneSettings() {
+  if (typeof localStorage === "undefined") {
+    return { showPreviewPane: true, previewPanePosition: "right" as PreviewPanePosition };
+  }
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PREVIEW_PANE_SETTINGS_KEY) ?? "{}") as {
+      showPreviewPane?: unknown;
+      previewPanePosition?: unknown;
+    };
+    return {
+      showPreviewPane: typeof parsed.showPreviewPane === "boolean" ? parsed.showPreviewPane : true,
+      previewPanePosition: parsed.previewPanePosition === "bottom" ? "bottom" as const : "right" as const,
+    };
+  } catch {
+    return { showPreviewPane: true, previewPanePosition: "right" as PreviewPanePosition };
+  }
+}
+
+const previewPaneSettings = readPreviewPaneSettings();
 
 // Bridge/session state is kept in this root component because TeamEdit is a
 // small sample app with one active document at a time.
@@ -37,6 +70,7 @@ const documents = ref<MindooDBAppDocumentSummary[]>([]);
 const currentDatabase = ref<MindooDBAppDatabase | null>(null);
 const currentDatabaseId = ref("");
 const currentDocument = ref<MindooDBAppDocument | null>(null);
+const currentRuntime = ref<MindooDBAppRuntime>("iframe");
 const hostUiPreferences = ref<MindooDBAppUiPreferences>({
   iosMultitaskingOptimized: false,
 });
@@ -53,8 +87,8 @@ const openDialogVisible = ref(false);
 const refreshConfirmVisible = ref(false);
 const infoDialogVisible = ref(false);
 const deleteConfirmVisible = ref(false);
-const showPreviewPane = ref(true);
-const previewPanePosition = ref<"right" | "bottom">("right");
+const showPreviewPane = ref(previewPaneSettings.showPreviewPane);
+const previewPanePosition = ref<PreviewPanePosition>(previewPaneSettings.previewPanePosition);
 const selectedOpenDocId = ref("");
 const copiedInfoLabel = ref<string | null>(null);
 let cleanupTheme: (() => void) | null = null;
@@ -71,6 +105,8 @@ const selectedDatabaseInfo = computed(() => databases.value.find((database) => d
 const currentDatabaseInfo = computed(() => databases.value.find((database) => database.id === currentDatabaseId.value) ?? null);
 const currentCanUpdate = computed(() => currentDatabaseInfo.value?.capabilities.includes("update") ?? false);
 const currentCanDelete = computed(() => currentDatabaseInfo.value?.capabilities.includes("delete") ?? false);
+const canUseAttachments = computed(() => currentDatabaseInfo.value?.capabilities.includes("attachments") ?? false);
+const canManageAttachments = computed(() => canUseAttachments.value && currentCanUpdate.value);
 const canCreate = computed(() => creatableDatabases.value.length > 0);
 const subjectDirty = computed(() => subject.value !== savedSubject.value);
 const hasLocalEdits = computed(() => isDirty.value || subjectDirty.value);
@@ -78,7 +114,6 @@ const canSave = computed(() => Boolean(hasLocalEdits.value && currentCanUpdate.v
 const canDelete = computed(() => Boolean(currentCanDelete.value && currentDatabase.value && currentDocument.value));
 const canRefresh = computed(() => Boolean(currentDatabase.value && currentDocument.value));
 const canShowInfo = computed(() => Boolean(currentDatabaseId.value && currentDocument.value));
-const renderedMarkdown = computed(() => markdownIt.render(markdown.value || ""));
 const splitterLayout = computed(() => previewPanePosition.value === "bottom" ? "vertical" : "horizontal");
 const currentDatabaseLabel = computed(() => {
   const info = databases.value.find((database) => database.id === currentDatabaseId.value);
@@ -90,6 +125,47 @@ const currentDatabaseLabel = computed(() => {
 function menuCheckIcon(checked: boolean) {
   return checked ? "pi pi-check" : "pi pi-check menu-check-placeholder";
 }
+
+const imageResolver = useAttachmentImageResolver({
+  database: currentDatabase,
+  document: currentDocument,
+});
+
+const {
+  busyAction: attachmentBusyAction,
+  canPreviewAttachment,
+  downloadAttachment,
+  formatAttachmentSize,
+  previewAttachment,
+  removeAttachment,
+  uploadAttachments,
+  uploadInputKey: attachmentUploadInputKey,
+} = useDocumentAttachments({
+  database: currentDatabase,
+  document: currentDocument,
+  runtime: currentRuntime,
+  setStatus(message) {
+    status.value = message;
+  },
+});
+
+const defaultImageRenderer = markdownIt.renderer.rules.image
+  ?? ((tokens, index, options, _env, self) => self.renderToken(tokens, index, options));
+markdownIt.renderer.rules.image = (tokens, index, options, env, self) => {
+  const token = tokens[index];
+  const srcIndex = token.attrIndex("src");
+  if (srcIndex >= 0 && token.attrs?.[srcIndex]) {
+    const src = token.attrs[srcIndex][1];
+    token.attrs[srcIndex][1] = imageResolver.getCachedImageUrl(src);
+  }
+  return defaultImageRenderer(tokens, index, options, env, self);
+};
+
+const renderedMarkdown = computed(() => {
+  imageResolver.revision.value;
+  return markdownIt.render(markdown.value || "");
+});
+
 const menuItems = computed<MenuItem[]>(() => [
   {
     label: "File",
@@ -188,6 +264,7 @@ onMounted(async () => {
     const context = await nextSession.getLaunchContext();
     applyAppTheme(context.theme);
     cleanupTheme = nextSession.onThemeChange((theme) => applyAppTheme(theme));
+    currentRuntime.value = context.runtime;
     hostUiPreferences.value = { ...context.uiPreferences };
     cleanupUiPreferences = nextSession.onUiPreferencesChange((uiPreferences) => {
       hostUiPreferences.value = { ...uiPreferences };
@@ -208,6 +285,27 @@ onBeforeUnmount(async () => {
   cleanupUiPreferences?.();
   await session.value?.disconnect();
 });
+
+watch(
+  () => [markdown.value, currentDatabaseId.value, currentDocument.value?.id, imageResolver.revision.value] as const,
+  () => {
+    void imageResolver.preloadMarkdownImages(markdown.value);
+  },
+  { immediate: true },
+);
+
+watch(
+  [showPreviewPane, previewPanePosition],
+  ([nextShowPreviewPane, nextPreviewPanePosition]) => {
+    if (typeof localStorage === "undefined") {
+      return;
+    }
+    localStorage.setItem(PREVIEW_PANE_SETTINGS_KEY, JSON.stringify({
+      showPreviewPane: nextShowPreviewPane,
+      previewPanePosition: nextPreviewPanePosition,
+    }));
+  },
+);
 
 async function openDatabaseById(databaseId: string) {
   if (!session.value || !databaseId) {
@@ -243,7 +341,7 @@ async function openFileDialog() {
   }
 }
 
-/** Create a new markdown document with a starter `body` field. */
+/** Create a new empty markdown document. */
 async function newFile() {
   try {
     const targetDatabaseInfo = selectedDatabaseInfo.value?.capabilities.includes("create")
@@ -256,8 +354,8 @@ async function newFile() {
     const database = await openDatabaseById(targetDatabaseInfo.id);
     const document = await database.documents.create({
       set: {
-        subject: "Untitled Markdown",
-        body: "# Untitled Markdown\n\nStart writing together.",
+        subject: "",
+        body: "",
       },
     });
     loadDocumentIntoEditor(database, targetDatabaseInfo.id, document);
@@ -428,6 +526,7 @@ async function deleteCurrentDocument() {
     deleteConfirmVisible.value = false;
     currentDocument.value = null;
     textBuffer.value = null;
+    imageResolver.clear();
     markdown.value = "";
     subject.value = "";
     savedSubject.value = "";
@@ -439,6 +538,35 @@ async function deleteCurrentDocument() {
 }
 
 /**
+ * Uploads an image selected inside Milkdown and returns the stable markdown URL
+ * that should be stored in the collaborative `body` text.
+ */
+async function uploadEditorImage(file: File) {
+  if (!currentDatabase.value || !currentDocument.value) {
+    throw new Error("Open or create a document before inserting images.");
+  }
+  if (!canManageAttachments.value) {
+    throw new Error("This application does not have attachment upload access for the current document database.");
+  }
+
+  const attachmentName = createUniqueImageAttachmentName(file.name);
+  await uploadFileAttachment(currentDatabase.value, currentDocument.value.id, attachmentName, file);
+  const refreshed = await currentDatabase.value.documents.get(currentDocument.value.id);
+  if (refreshed) {
+    currentDocument.value = refreshed;
+  }
+  const markdownUrl = createAttachmentMarkdownUrl(attachmentName);
+  void imageResolver.resolveImageUrl(markdownUrl);
+  status.value = `Uploaded image ${file.name}.`;
+  return markdownUrl;
+}
+
+async function removeDocumentAttachment(attachmentName: string) {
+  await removeAttachment(attachmentName);
+  imageResolver.clear();
+}
+
+/**
  * Replace the active editor state with a document snapshot.
  *
  * This creates a new `MindooDBTextBuffer` bound to the document's `body` path.
@@ -446,6 +574,7 @@ async function deleteCurrentDocument() {
  * merged correctly with concurrent changes.
  */
 function loadDocumentIntoEditor(database: MindooDBAppDatabase, databaseId: string, document: MindooDBAppDocument) {
+  imageResolver.clear();
   currentDatabase.value = database;
   currentDatabaseId.value = databaseId;
   currentDocument.value = document;
@@ -536,6 +665,8 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
                 </label>
                 <MilkdownMarkdownEditor
                   :model-value="markdown"
+                  :on-image-upload="uploadEditorImage"
+                  :resolve-image-url="imageResolver.resolveImageUrl"
                   @update:model-value="onEditorUpdate"
                 />
               </template>
@@ -566,6 +697,8 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
             </label>
             <MilkdownMarkdownEditor
               :model-value="markdown"
+              :on-image-upload="uploadEditorImage"
+              :resolve-image-url="imageResolver.resolveImageUrl"
               @update:model-value="onEditorUpdate"
             />
           </template>
@@ -574,6 +707,21 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
           </div>
         </section>
       </section>
+
+      <DocumentAttachmentsPanel
+        v-if="currentDocument"
+        :attachments="currentDocument.attachments ?? []"
+        :busy-action="attachmentBusyAction"
+        :can-manage-attachments="canManageAttachments"
+        :can-use-attachments="canUseAttachments"
+        :upload-input-key="attachmentUploadInputKey"
+        :can-preview-attachment="canPreviewAttachment"
+        :format-attachment-size="formatAttachmentSize"
+        @upload="uploadAttachments"
+        @preview="previewAttachment"
+        @download="downloadAttachment"
+        @remove="removeDocumentAttachment"
+      />
     </section>
 
     <Dialog v-model:visible="openDialogVisible" modal header="Open Markdown Document" :style="{ width: '32rem' }">
@@ -693,7 +841,7 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
   min-height: 100vh;
   padding: 2px;
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 2px;
 }
 
@@ -706,13 +854,9 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
   align-items: center;
   justify-content: space-between;
   gap: 0.45rem;
-  border-radius: 0.6rem;
+  border-radius: 0;
   backdrop-filter: blur(26px);
   isolation: isolate;
-}
-
-.toolbar--ios-multitasking :deep(.p-menubar-button) {
-  margin-left: 80px;
 }
 
 .eyebrow,
@@ -729,10 +873,11 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
   align-items: center;
   flex: 1 1 auto;
   min-width: 0;
-  gap: 0.15rem;
+  gap: 0;
 }
 
 :deep(.toolbar__menubar) {
+  position: relative;
   flex: 0 0 auto;
   border: 0;
   background: transparent;
@@ -761,7 +906,7 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
 
 .toolbar__title {
   flex: 0 0 auto;
-  margin: 0 0.35rem 0 0.3rem;
+  margin: 0;
   font-weight: 700;
   color: var(--muted);
 }
@@ -793,7 +938,13 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
   visibility: hidden;
 }
 
-@media (max-width: 759px) {
+@media (max-width: 960px) {
+  .toolbar--ios-multitasking .toolbar__title {
+    margin-left: 80px;
+  }
+}
+
+@media (max-width: 960px) {
   :deep(.toolbar__menubar.p-menubar-mobile .p-menubar-root-list) {
     position: absolute;
     top: calc(100% + 0.45rem);
@@ -812,13 +963,16 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
 
 .workspace {
   min-height: 0;
-  display: block;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 2px;
 }
 
 .editor-panel,
 .preview-panel {
   min-height: 0;
   padding: 1rem;
+  border-radius: 0;
 }
 
 .document-area {
@@ -832,6 +986,7 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
   min-height: 0;
   height: 100%;
   border: 0;
+  border-radius: 0;
   background: transparent;
 }
 
