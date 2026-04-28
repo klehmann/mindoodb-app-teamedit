@@ -1,0 +1,72 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b1020;
+  --bg-elevated: rgba(12, 18, 34, 0.94);
+  --bg-soft: rgba(27, 39, 70, 0.78);
+  --border: rgba(118, 141, 191, 0.2);
+  --border-strong: rgba(212, 160, 23, 0.26);
+  --text: #eef2ff;
+  --muted: #a7b4cf;
+  --primary: #1f3a8a;
+  --accent: #d4a017;
+  --shadow: 0 28px 80px rgba(1, 5, 16, 0.45);
+  --radius-lg: 24px;
+  --radius-md: 16px;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f7f9fc;
+  --bg-elevated: rgba(255, 255, 255, 0.94);
+  --bg-soft: rgba(244, 247, 255, 0.94);
+  --border: rgba(31, 58, 138, 0.14);
+  --border-strong: rgba(212, 160, 23, 0.28);
+  --text: #17233b;
+  --muted: #667795;
+  --shadow: 0 28px 80px rgba(45, 65, 110, 0.16);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background:
+    radial-gradient(circle at top left, rgb(31 58 138 / 0.16), transparent 28%),
+    radial-gradient(circle at bottom right, rgb(212 160 23 / 0.12), transparent 24%),
+    var(--bg);
+  color: var(--text);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.glass-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
+}
