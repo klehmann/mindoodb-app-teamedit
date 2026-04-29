@@ -58,4 +58,33 @@ describe("markdownRendering", () => {
   it("escapes document strings for HTML contexts", () => {
     expect(escapeHtml("<Team & Edit \"Doc\">")).toBe("&lt;Team &amp; Edit &quot;Doc&quot;&gt;");
   });
+
+  it("translates Crepe ratio-encoded image alt text into a data attribute", () => {
+    const html = renderMarkdownFragment("![0.50](mindoodb-attachment:image.png \"Team photo\")");
+
+    expect(html).toContain("data-teamedit-image-ratio=\"0.50\"");
+    expect(html).toContain("alt=\"Team photo\"");
+    expect(html).not.toContain("alt=\"0.50\"");
+  });
+
+  it("strips numeric image alt text without a caption", () => {
+    const html = renderMarkdownFragment("![0.75](mindoodb-attachment:image.png)");
+
+    expect(html).toContain("data-teamedit-image-ratio=\"0.75\"");
+    expect(html).toContain("alt=\"\"");
+  });
+
+  it("does not add a ratio attribute when the alt is the implicit ratio of 1", () => {
+    const html = renderMarkdownFragment("![1.00](mindoodb-attachment:image.png \"Team photo\")");
+
+    expect(html).not.toContain("data-teamedit-image-ratio");
+    expect(html).toContain("alt=\"Team photo\"");
+  });
+
+  it("leaves non-numeric alt text untouched", () => {
+    const html = renderMarkdownFragment("![A nice photo](mindoodb-attachment:image.png)");
+
+    expect(html).not.toContain("data-teamedit-image-ratio");
+    expect(html).toContain("alt=\"A nice photo\"");
+  });
 });

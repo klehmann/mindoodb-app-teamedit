@@ -19,16 +19,19 @@ import {
   type MindooDBTextBuffer,
 } from "mindoodb-app-sdk";
 
+import AttachmentPickerDialog from "@/components/AttachmentPickerDialog.vue";
 import DocumentAttachmentsPanel from "@/components/DocumentAttachmentsPanel.vue";
 import MilkdownMarkdownEditor from "@/components/MilkdownMarkdownEditor.vue";
 import { useAttachmentImageResolver } from "@/composables/useAttachmentImageResolver";
 import { useDocumentAttachments } from "@/composables/useDocumentAttachments";
 import {
+  type AttachmentInsertion,
   createAttachmentMarkdownUrl,
   createUniqueImageAttachmentName,
   uploadFileAttachment,
 } from "@/lib/attachmentImages";
 import { exportMarkdownFile, exportMarkdownPackage } from "@/lib/exportMarkdown";
+import { applyImageRatios } from "@/lib/imageRatio";
 import { createMarkdownRenderer, normalizeMarkdownForRendering } from "@/lib/markdownRendering";
 import { renderMermaidPlaceholders } from "@/lib/mermaid";
 import { renderAndPrintMarkdownWindow } from "@/lib/printMarkdown";
@@ -84,6 +87,13 @@ const openDialogVisible = ref(false);
 const refreshConfirmVisible = ref(false);
 const infoDialogVisible = ref(false);
 const deleteConfirmVisible = ref(false);
+const attachmentPickerVisible = ref(false);
+// The slash-menu callback hands us a promise resolver that we keep around
+// while the attachment picker dialog is open. The resolver is invoked from
+// either the picker's `select` or `cancel` paths, never both, and is cleared
+// once it fires so a closed-and-reopened dialog can never resolve a stale
+// editor request.
+let attachmentPickerResolver: ((value: AttachmentInsertion | null) => void) | null = null;
 const showPreviewPane = ref(previewPaneSettings.showPreviewPane);
 const previewPanePosition = ref<PreviewPanePosition>(previewPaneSettings.previewPanePosition);
 const previewRoot = ref<HTMLElement | null>(null);
@@ -326,12 +336,31 @@ async function renderPreviewMermaidDiagrams() {
   });
 }
 
+function applyPreviewImageRatios() {
+  if (previewRoot.value) {
+    applyImageRatios(previewRoot.value);
+  }
+}
+
 watch(
   () => [renderedMarkdown.value, showPreviewPane.value] as const,
   () => {
     void renderPreviewMermaidDiagrams();
+    // Run after markdown-it has finished writing into v-html so we can
+    // measure container width for the ratio computation.
+    void nextTick(applyPreviewImageRatios);
   },
   { flush: "post", immediate: true },
+);
+
+// The preview reuses object URLs created by the image resolver. When those
+// resolve later we re-rerun the scaling so freshly-decoded images pick up
+// their saved ratio without waiting for the next markdown change.
+watch(
+  () => imageResolver.revision.value,
+  () => {
+    void nextTick(applyPreviewImageRatios);
+  },
 );
 
 watch(
@@ -684,6 +713,46 @@ async function removeDocumentAttachment(attachmentName: string) {
 }
 
 /**
+ * Open the attachment picker dialog for the editor's slash menu.
+ *
+ * The editor awaits the returned promise: resolving with a selection inserts
+ * the attachment as either a markdown image (`![alt](url)`) or a markdown link
+ * (`[label](url)`); resolving with `null` leaves the document unchanged.
+ */
+function requestAttachmentInsertFromEditor(): Promise<AttachmentInsertion | null> {
+  if (!currentDocument.value) {
+    status.value = "Open a document before inserting attachments.";
+    return Promise.resolve(null);
+  }
+  if (!canUseAttachments.value) {
+    status.value = "This application does not have attachment access for the current document database.";
+    return Promise.resolve(null);
+  }
+  // If a previous request is still pending (e.g. user reopened the slash menu
+  // before the dialog closed) we cancel it so each call resolves exactly once.
+  attachmentPickerResolver?.(null);
+  return new Promise<AttachmentInsertion | null>((resolve) => {
+    attachmentPickerResolver = resolve;
+    attachmentPickerVisible.value = true;
+  });
+}
+
+function handleAttachmentPickerSelect(selection: AttachmentInsertion) {
+  const resolver = attachmentPickerResolver;
+  attachmentPickerResolver = null;
+  resolver?.(selection);
+  status.value = selection.isImage
+    ? `Inserted image attachment ${selection.url.replace(/^mindoodb-attachment:/, "")}.`
+    : `Inserted link to attachment ${selection.url.replace(/^mindoodb-attachment:/, "")}.`;
+}
+
+function handleAttachmentPickerCancel() {
+  const resolver = attachmentPickerResolver;
+  attachmentPickerResolver = null;
+  resolver?.(null);
+}
+
+/**
  * Replace the active editor state with a document snapshot.
  *
  * This creates a new `MindooDBTextBuffer` bound to the document's `body` path.
@@ -784,6 +853,7 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
                   :model-value="markdown"
                   :on-image-upload="uploadEditorImage"
                   :resolve-image-url="imageResolver.resolveImageUrl"
+                  :request-attachment-insert="requestAttachmentInsertFromEditor"
                   @update:model-value="onEditorUpdate"
                 />
               </template>
@@ -816,6 +886,7 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
               :model-value="markdown"
               :on-image-upload="uploadEditorImage"
               :resolve-image-url="imageResolver.resolveImageUrl"
+              :request-attachment-insert="requestAttachmentInsertFromEditor"
               @update:model-value="onEditorUpdate"
             />
           </template>
@@ -950,6 +1021,14 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
         <Button label="Close" text @click="infoDialogVisible = false" />
       </template>
     </Dialog>
+
+    <AttachmentPickerDialog
+      v-model:visible="attachmentPickerVisible"
+      :attachments="currentDocument?.attachments ?? []"
+      :resolve-image-url="imageResolver.resolveImageUrl"
+      @select="handleAttachmentPickerSelect"
+      @cancel="handleAttachmentPickerCancel"
+    />
   </main>
 </template>
 

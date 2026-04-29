@@ -4,6 +4,7 @@ import { clearTextInCurrentBlockCommand } from "@milkdown/kit/preset/commonmark"
 import { insert } from "@milkdown/kit/utils";
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 
+import type { AttachmentInsertion } from "@/lib/attachmentImages";
 import { escapeHtml } from "@/lib/markdownRendering";
 import { isMermaidLanguage, MERMAID_PLACEHOLDER_CLASS, renderMermaidSvg } from "@/lib/mermaid";
 
@@ -11,6 +12,12 @@ const props = defineProps<{
   modelValue: string;
   onImageUpload?: (file: File) => Promise<string>;
   resolveImageUrl?: (url: string) => Promise<string> | string;
+  /**
+   * Called by the slash menu's "Attachment" entry. The host opens a picker UI
+   * with the document's existing attachments; resolving with `null` cancels
+   * the insertion.
+   */
+  requestAttachmentInsert?: () => Promise<AttachmentInsertion | null>;
 }>();
 
 const emit = defineEmits<{
@@ -28,6 +35,29 @@ const diagramIcon = `
     <path d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6ZM8 10h2v2h4v2h2v-2h2v-2h-4V8h-2v2H8v2Z"/>
   </svg>
 `;
+const attachmentIcon = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+    <path d="M16.5 6.5v9.75a4.75 4.75 0 0 1-9.5 0V5.5a3.25 3.25 0 0 1 6.5 0v10.25a1.75 1.75 0 0 1-3.5 0V7H11v8.75a.75.75 0 0 0 1.5 0V5.5a1.75 1.75 0 0 0-3.5 0v10.75a3.25 3.25 0 0 0 6.5 0V6.5h1Z"/>
+  </svg>
+`;
+
+function escapeMarkdownAlt(value: string) {
+  // Markdown image alt and link labels are bracketed; escape the closing brace
+  // and backslashes so user-provided text never breaks the surrounding syntax.
+  return value.replace(/\\/g, "\\\\").replace(/]/g, "\\]");
+}
+
+function escapeMarkdownUrl(value: string) {
+  // Parentheses around the URL also need escaping. We expect the
+  // mindoodb-attachment scheme so this is mostly defensive.
+  return value.replace(/\\/g, "\\\\").replace(/\)/g, "\\)");
+}
+
+function buildAttachmentMarkdown(result: AttachmentInsertion) {
+  const alt = escapeMarkdownAlt(result.alt || "");
+  const url = escapeMarkdownUrl(result.url);
+  return result.isImage ? `![${alt}](${url})` : `[${alt || url}](${url})`;
+}
 
 function createMermaidMessageHtml(message: string, tone: "muted" | "error" = "muted") {
   return [
@@ -83,6 +113,27 @@ async function createEditor() {
             onRun(ctx: any) {
               ctx.get(commandsCtx).call(clearTextInCurrentBlockCommand.key);
               insert(MERMAID_TEMPLATE)(ctx);
+            },
+          });
+          // The "Attachment" entry lets the user reference an existing document
+          // attachment without re-uploading it. The picker dialog lives in the
+          // host so it can read the document's attachments and resolve image
+          // thumbnails with the same resolver the editor uses.
+          builder.addGroup("attachment", "Attachment").addItem("attachment", {
+            label: "Attachment",
+            icon: attachmentIcon,
+            onRun: (ctx: any) => {
+              ctx.get(commandsCtx).call(clearTextInCurrentBlockCommand.key);
+              const requestInsert = props.requestAttachmentInsert;
+              if (!requestInsert) {
+                return;
+              }
+              void Promise.resolve(requestInsert()).then((result) => {
+                if (!result) {
+                  return;
+                }
+                insert(buildAttachmentMarkdown(result))(ctx);
+              });
             },
           });
         },

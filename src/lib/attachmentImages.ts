@@ -3,6 +3,19 @@ import type { MindooDBAppDatabase } from "mindoodb-app-sdk";
 const ATTACHMENT_MARKDOWN_SCHEME = "mindoodb-attachment:";
 const DEFAULT_CHUNK_SIZE = 64 * 1024;
 
+/**
+ * Payload returned by the attachment picker when the user inserts an existing
+ * document attachment into the editor.
+ *
+ * `isImage` controls whether the editor renders a markdown image (`![alt](url)`)
+ * or a plain markdown link (`[label](url)`).
+ */
+export interface AttachmentInsertion {
+  url: string;
+  alt: string;
+  isImage: boolean;
+}
+
 /** Returns true when a markdown image URL points at a MindooDB document attachment. */
 export function isAttachmentMarkdownUrl(url: string) {
   return url.startsWith(ATTACHMENT_MARKDOWN_SCHEME);

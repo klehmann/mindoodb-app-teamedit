@@ -1,3 +1,4 @@
+import { applyImageRatios } from "@/lib/imageRatio";
 import {
   escapeHtml,
   MARKDOWN_CONTENT_CLASS,
@@ -233,6 +234,10 @@ export async function renderAndPrintMarkdownWindow(printWindow: Window, options:
   await renderMermaidPlaceholders(printWindow.document, {
     idPrefix: "teamedit-print-mermaid",
   });
+  // Set up ratio scaling listeners up front so each image is resized as soon
+  // as it loads. waitForPrintAssets() below resolves only after every image
+  // has fired its load/error event, by which point the heights are in place.
+  applyImageRatios(printWindow.document);
   await waitForPrintAssets(printWindow.document);
 
   printWindow.focus();
