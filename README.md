@@ -336,3 +336,9 @@ The collaborative text editing flow is covered end-to-end by the SDK and Haven t
 - [`mindoodb-app-sdk`](https://github.com/klehmann/mindoodb-app-sdk) -- the SDK reference, including the launch context, capability model, document and attachment APIs, and host events.
 - [`mindoodb-app-example`](https://github.com/klehmann/mindoodb-app-example) -- a broader reference app exercising every SDK area.
 - [`mindoodb-app-vega`](https://github.com/klehmann/mindoodb-app-vega) -- a richer Vue 3 sample using attachments and Haven views.
+
+## License
+
+TeamEdit is released under the [Apache License 2.0](./LICENSE). See the [`LICENSE`](./LICENSE) file for the full text.
+
+Copyright (c) 2026 Mindoo GmbH.

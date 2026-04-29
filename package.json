@@ -2,7 +2,7 @@
   "name": "mindoodb-app-teamedit",
   "version": "1.0.0",
   "description": "Collaborative markdown editor sample app for MindooDB Haven",
-  "license": "ISC",
+  "license": "Apache-2.0",
   "author": "Mindoo GmbH",
   "type": "module",
   "main": "./src/main.ts",
