@@ -12,7 +12,10 @@ import {
   type MindooDBAppDatabase,
   type MindooDBAppDatabaseInfo,
   type MindooDBAppDocument,
+  type MindooDBAppDocumentHistoryEntry,
+  type MindooDBAppDocumentRevisionId,
   type MindooDBAppDocumentSummary,
+  type MindooDBAppHistoricalDocument,
   type MindooDBAppRuntime,
   type MindooDBAppSession,
   type MindooDBAppUiPreferences,
@@ -21,6 +24,7 @@ import {
 
 import AttachmentPickerDialog from "@/components/AttachmentPickerDialog.vue";
 import DocumentAttachmentsPanel from "@/components/DocumentAttachmentsPanel.vue";
+import DocumentRevisionDialog from "@/components/DocumentRevisionDialog.vue";
 import MilkdownMarkdownEditor from "@/components/MilkdownMarkdownEditor.vue";
 import { useAttachmentImageResolver } from "@/composables/useAttachmentImageResolver";
 import { useDocumentAttachments } from "@/composables/useDocumentAttachments";
@@ -70,6 +74,7 @@ const documents = ref<MindooDBAppDocumentSummary[]>([]);
 const currentDatabase = ref<MindooDBAppDatabase | null>(null);
 const currentDatabaseId = ref("");
 const currentDocument = ref<MindooDBAppDocument | null>(null);
+const viewingHistoricalSnapshot = ref<MindooDBAppHistoricalDocument | null>(null);
 const currentRuntime = ref<MindooDBAppRuntime>("iframe");
 const hostUiPreferences = ref<MindooDBAppUiPreferences>({
   iosMultitaskingOptimized: false,
@@ -88,6 +93,10 @@ const refreshConfirmVisible = ref(false);
 const infoDialogVisible = ref(false);
 const deleteConfirmVisible = ref(false);
 const attachmentPickerVisible = ref(false);
+const revisionDialogVisible = ref(false);
+const revisionEntries = ref<MindooDBAppDocumentHistoryEntry[]>([]);
+const revisionLoading = ref(false);
+const revisionErrorMessage = ref<string | null>(null);
 // The slash-menu callback hands us a promise resolver that we keep around
 // while the attachment picker dialog is open. The resolver is invoked from
 // either the picker's `select` or `cancel` paths, never both, and is cleared
@@ -114,20 +123,40 @@ const selectedDatabaseInfo = computed(() => databases.value.find((database) => d
 const currentDatabaseInfo = computed(() => databases.value.find((database) => database.id === currentDatabaseId.value) ?? null);
 const currentCanUpdate = computed(() => currentDatabaseInfo.value?.capabilities.includes("update") ?? false);
 const currentCanDelete = computed(() => currentDatabaseInfo.value?.capabilities.includes("delete") ?? false);
+const currentCanBrowseHistory = computed(() => currentDatabaseInfo.value?.capabilities.includes("history") ?? false);
+const isViewingHistorical = computed(() => viewingHistoricalSnapshot.value !== null);
+const activeDocumentView = computed(() => viewingHistoricalSnapshot.value ?? currentDocument.value);
+const activeRevisionId = computed<MindooDBAppDocumentRevisionId | null>(() => viewingHistoricalSnapshot.value?.revisionId ?? null);
 const canUseAttachments = computed(() => currentDatabaseInfo.value?.capabilities.includes("attachments") ?? false);
-const canManageAttachments = computed(() => canUseAttachments.value && currentCanUpdate.value);
+const canManageAttachments = computed(() => canUseAttachments.value && currentCanUpdate.value && !isViewingHistorical.value);
 const canCreate = computed(() => creatableDatabases.value.length > 0);
 const subjectDirty = computed(() => subject.value !== savedSubject.value);
 const hasLocalEdits = computed(() => isDirty.value || subjectDirty.value);
-const canSave = computed(() => Boolean(hasLocalEdits.value && currentCanUpdate.value && currentDatabase.value && currentDocument.value));
-const canDelete = computed(() => Boolean(currentCanDelete.value && currentDatabase.value && currentDocument.value));
+const canSave = computed(() => Boolean(!isViewingHistorical.value && hasLocalEdits.value && currentCanUpdate.value && currentDatabase.value && currentDocument.value));
+const canDelete = computed(() => Boolean(!isViewingHistorical.value && currentCanDelete.value && currentDatabase.value && currentDocument.value));
 const canRefresh = computed(() => Boolean(currentDatabase.value && currentDocument.value));
 const canShowInfo = computed(() => Boolean(currentDatabaseId.value && currentDocument.value));
 const canPrint = computed(() => Boolean(currentDocument.value));
 const canExportMarkdown = computed(() => Boolean(currentDocument.value));
-const hasAttachments = computed(() => (currentDocument.value?.attachments?.length ?? 0) > 0);
+const activeAttachments = computed(() => activeDocumentView.value?.attachments ?? []);
+const hasAttachments = computed(() => activeAttachments.value.length > 0);
 const canExportMarkdownWithAttachments = computed(() =>
   Boolean(currentDatabase.value && currentDocument.value && hasAttachments.value));
+const currentRevisionId = computed(() => {
+  if (viewingHistoricalSnapshot.value?.revisionId) {
+    return viewingHistoricalSnapshot.value.revisionId;
+  }
+  return revisionEntries.value.find((entry) => entry.isCurrent)?.revisionId ?? null;
+});
+const statusBadgeLabel = computed(() => {
+  if (viewingHistoricalSnapshot.value) {
+    return `Historical · ${formatRevisionDate(viewingHistoricalSnapshot.value.timestamp)}`;
+  }
+  return `Current · ${hasLocalEdits.value ? "Unsaved" : "Saved"}`;
+});
+const statusBadgeTooltip = computed(() => isViewingHistorical.value
+  ? "You're viewing a historical revision. Click to pick a different version or return to the current one."
+  : "You're viewing the current version. Click to browse older revisions.");
 const splitterLayout = computed(() => previewPanePosition.value === "bottom" ? "vertical" : "horizontal");
 const currentDatabaseLabel = computed(() => {
   const info = databases.value.find((database) => database.id === currentDatabaseId.value);
@@ -142,7 +171,8 @@ function menuCheckIcon(checked: boolean) {
 
 const imageResolver = useAttachmentImageResolver({
   database: currentDatabase,
-  document: currentDocument,
+  document: activeDocumentView,
+  revisionId: activeRevisionId,
 });
 
 const {
@@ -156,8 +186,12 @@ const {
   uploadInputKey: attachmentUploadInputKey,
 } = useDocumentAttachments({
   database: currentDatabase,
-  document: currentDocument,
+  document: activeDocumentView,
+  revisionId: activeRevisionId,
   runtime: currentRuntime,
+  onDocumentRefresh(document) {
+    currentDocument.value = document;
+  },
   setStatus(message) {
     status.value = message;
   },
@@ -194,6 +228,14 @@ const menuItems = computed<MenuItem[]>(() => [
         },
       },
       {
+        label: "Save",
+        icon: "pi pi-save",
+        disabled: !canSave.value,
+        command: () => {
+          void saveFile();
+        },
+      },
+      {
         label: "Info",
         icon: "pi pi-info-circle",
         disabled: !canShowInfo.value,
@@ -210,6 +252,16 @@ const menuItems = computed<MenuItem[]>(() => [
           void printCurrentDocument();
         },
       },
+      { separator: true },
+      {
+        label: "Delete",
+        icon: "pi pi-trash",
+        disabled: !canDelete.value,
+        command: () => {
+          deleteConfirmVisible.value = true;
+        },
+      },
+      { separator: true },
       {
         label: "Export Markdown",
         icon: "pi pi-file-export",
@@ -225,23 +277,6 @@ const menuItems = computed<MenuItem[]>(() => [
         disabled: !canExportMarkdownWithAttachments.value,
         command: () => {
           void exportCurrentMarkdownWithAttachments();
-        },
-      },
-      { separator: true },
-      {
-        label: "Save",
-        icon: "pi pi-save",
-        disabled: !canSave.value,
-        command: () => {
-          void saveFile();
-        },
-      },
-      {
-        label: "Delete",
-        icon: "pi pi-trash",
-        disabled: !canDelete.value,
-        command: () => {
-          deleteConfirmVisible.value = true;
         },
       },
     ],
@@ -455,6 +490,10 @@ async function openSelectedDocument() {
 
 /** Ask before discarding local edits, otherwise refresh immediately. */
 function requestRefreshCurrentDocument() {
+  if (isViewingHistorical.value) {
+    returnToCurrent();
+    return;
+  }
   if (!canRefresh.value) {
     status.value = "Open a document before refreshing.";
     return;
@@ -464,6 +503,82 @@ function requestRefreshCurrentDocument() {
     return;
   }
   void refreshCurrentDocument();
+}
+
+async function openRevisionDialog() {
+  if (!currentDatabase.value || !currentDocument.value || !currentCanBrowseHistory.value) {
+    return;
+  }
+  revisionDialogVisible.value = true;
+  revisionLoading.value = true;
+  revisionErrorMessage.value = null;
+  try {
+    revisionEntries.value = await currentDatabase.value.documents.listHistory(currentDocument.value.id);
+  } catch (error) {
+    revisionErrorMessage.value = error instanceof Error ? error.message : "The revision list could not be loaded.";
+  } finally {
+    revisionLoading.value = false;
+  }
+}
+
+async function loadHistoricalRevision(revisionId: MindooDBAppDocumentRevisionId) {
+  if (!currentDatabase.value || !currentDocument.value) {
+    status.value = "Open a document before loading revisions.";
+    return;
+  }
+  if (revisionEntries.value.find((entry) => entry.revisionId === revisionId)?.isCurrent) {
+    revisionDialogVisible.value = false;
+    returnToCurrent();
+    return;
+  }
+  try {
+    const snapshot = await currentDatabase.value.documents.getAtRevision(currentDocument.value.id, revisionId);
+    if (snapshot.state !== "exists" || !snapshot.data) {
+      status.value = snapshot.state === "deleted"
+        ? "That revision is a deletion marker and cannot be opened in the editor."
+        : "That revision is no longer available.";
+      return;
+    }
+    viewingHistoricalSnapshot.value = snapshot;
+    textBuffer.value = null;
+    savedSubject.value = readHistoricalSubject(snapshot);
+    subject.value = savedSubject.value;
+    suppressEditorUpdate = true;
+    markdown.value = readHistoricalBody(snapshot);
+    isDirty.value = false;
+    imageResolver.clear();
+    revisionDialogVisible.value = false;
+    queueMicrotask(() => {
+      suppressEditorUpdate = false;
+    });
+    status.value = `Loaded revision from ${formatRevisionDate(snapshot.timestamp)}.`;
+  } catch (error) {
+    status.value = error instanceof Error ? error.message : "The revision could not be loaded.";
+  }
+}
+
+function returnToCurrent() {
+  if (!currentDocument.value) {
+    return;
+  }
+  viewingHistoricalSnapshot.value = null;
+  imageResolver.clear();
+  textBuffer.value = currentDatabase.value
+    ? createMindooDBTextBuffer({
+        database: currentDatabase.value,
+        document: currentDocument.value,
+        path: ["body"],
+      })
+    : null;
+  savedSubject.value = readSubject(currentDocument.value);
+  subject.value = savedSubject.value;
+  suppressEditorUpdate = true;
+  markdown.value = textBuffer.value?.value ?? readDocumentBody(currentDocument.value);
+  isDirty.value = false;
+  queueMicrotask(() => {
+    suppressEditorUpdate = false;
+  });
+  status.value = "Returned to the current version.";
 }
 
 /** Re-read the open document from Haven and discard unsaved local edits. */
@@ -588,7 +703,7 @@ async function exportCurrentMarkdownWithAttachments() {
     return;
   }
 
-  const attachments = currentDocument.value.attachments ?? [];
+  const attachments = activeAttachments.value;
   if (attachments.length === 0) {
     status.value = "This document has no attachments to export.";
     return;
@@ -602,6 +717,7 @@ async function exportCurrentMarkdownWithAttachments() {
       markdown: markdown.value,
       title: subject.value || "Untitled document",
       attachments,
+      revisionId: activeRevisionId.value ?? undefined,
     });
     status.value = saved ? "Exported markdown package." : "Markdown package export cancelled.";
   } catch (error) {
@@ -624,6 +740,10 @@ async function saveFile() {
   }
   if (!currentCanUpdate.value) {
     status.value = "This application does not have write access to the current document database.";
+    return;
+  }
+  if (isViewingHistorical.value) {
+    status.value = "Historical revisions are read-only. Return to the current version before saving.";
     return;
   }
   try {
@@ -664,6 +784,10 @@ async function deleteCurrentDocument() {
   }
   if (!currentCanDelete.value) {
     status.value = "This application does not have delete access to the current document database.";
+    return;
+  }
+  if (isViewingHistorical.value) {
+    status.value = "Historical revisions are read-only. Return to the current version before deleting.";
     return;
   }
   try {
@@ -728,6 +852,10 @@ function requestAttachmentInsertFromEditor(): Promise<AttachmentInsertion | null
     status.value = "This application does not have attachment access for the current document database.";
     return Promise.resolve(null);
   }
+  if (isViewingHistorical.value) {
+    status.value = "Return to the current version before inserting attachment links.";
+    return Promise.resolve(null);
+  }
   // If a previous request is still pending (e.g. user reopened the slash menu
   // before the dialog closed) we cancel it so each call resolves exactly once.
   attachmentPickerResolver?.(null);
@@ -764,6 +892,7 @@ function loadDocumentIntoEditor(database: MindooDBAppDatabase, databaseId: strin
   currentDatabase.value = database;
   currentDatabaseId.value = databaseId;
   currentDocument.value = document;
+  viewingHistoricalSnapshot.value = null;
   textBuffer.value = createMindooDBTextBuffer({
     database,
     document,
@@ -786,6 +915,9 @@ function loadDocumentIntoEditor(database: MindooDBAppDatabase, databaseId: strin
  * buffer converts each new value to a minimal text splice with `replaceText()`.
  */
 function onEditorUpdate(value: string) {
+  if (isViewingHistorical.value) {
+    return;
+  }
   markdown.value = value;
   if (!suppressEditorUpdate) {
     textBuffer.value?.replaceText(value);
@@ -796,6 +928,28 @@ function onEditorUpdate(value: string) {
 function readSubject(document: MindooDBAppDocument) {
   const value = document.data.subject;
   return typeof value === "string" ? value : "";
+}
+
+function readDocumentBody(document: MindooDBAppDocument) {
+  const value = document.data.body;
+  return typeof value === "string" ? value : "";
+}
+
+function readHistoricalSubject(snapshot: MindooDBAppHistoricalDocument) {
+  const value = snapshot.data?.subject;
+  return typeof value === "string" ? value : "";
+}
+
+function readHistoricalBody(snapshot: MindooDBAppHistoricalDocument) {
+  const value = snapshot.data?.body;
+  return typeof value === "string" ? value : "";
+}
+
+function formatRevisionDate(timestamp: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(timestamp));
 }
 
 function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
@@ -814,19 +968,28 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
         <span class="toolbar__title">TeamEdit</span>
         <Menubar :model="menuItems" class="toolbar__menubar" />
         <Button
-          icon="pi pi-refresh"
+          :icon="isViewingHistorical ? 'pi pi-history' : 'pi pi-refresh'"
           text
           rounded
           severity="secondary"
           class="toolbar__refresh"
-          aria-label="Refresh document"
-          title="Refresh document"
+          :aria-label="isViewingHistorical ? 'Return to current version' : 'Refresh document'"
+          :title="isViewingHistorical ? 'Return to current version' : 'Refresh document'"
           :disabled="!canRefresh"
           @click="requestRefreshCurrentDocument"
         />
       </div>
       <div class="toolbar__meta">
-        <span class="toolbar__dirty">{{ hasLocalEdits ? "Unsaved" : "Saved" }}</span>
+        <button
+          v-if="currentCanBrowseHistory && currentDocument"
+          class="toolbar__status-badge"
+          type="button"
+          v-tooltip="statusBadgeTooltip"
+          @click="openRevisionDialog"
+        >
+          {{ statusBadgeLabel }}
+        </button>
+        <span v-else class="toolbar__status-badge">{{ statusBadgeLabel }}</span>
       </div>
     </header>
 
@@ -838,8 +1001,13 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
           class="editor-preview-splitter"
         >
           <SplitterPanel :size="previewPanePosition === 'bottom' ? 60 : 62" :min-size="25" class="splitter-panel">
-            <section class="editor-panel glass-card">
+            <section class="editor-panel glass-card" :class="{ 'editor-panel--history': isViewingHistorical }">
               <template v-if="currentDocument">
+                <div v-if="isViewingHistorical" class="history-banner">
+                  <i class="pi pi-history" aria-hidden="true" />
+                  <span>You're viewing the version from {{ formatRevisionDate(viewingHistoricalSnapshot?.timestamp ?? 0) }} - read-only.</span>
+                  <button type="button" @click="returnToCurrent">Return to current</button>
+                </div>
                 <label class="field subject-field">
                   <span class="field-label">Title</span>
                   <input
@@ -847,6 +1015,7 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
                     class="native-input subject-input"
                     placeholder="Document title"
                     type="text"
+                    :readonly="isViewingHistorical"
                   >
                 </label>
                 <MilkdownMarkdownEditor
@@ -854,6 +1023,7 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
                   :on-image-upload="uploadEditorImage"
                   :resolve-image-url="imageResolver.resolveImageUrl"
                   :request-attachment-insert="requestAttachmentInsertFromEditor"
+                  :readonly="isViewingHistorical"
                   @update:model-value="onEditorUpdate"
                 />
               </template>
@@ -871,8 +1041,13 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
           </SplitterPanel>
         </Splitter>
 
-        <section v-else class="editor-panel glass-card">
+        <section v-else class="editor-panel glass-card" :class="{ 'editor-panel--history': isViewingHistorical }">
           <template v-if="currentDocument">
+            <div v-if="isViewingHistorical" class="history-banner">
+              <i class="pi pi-history" aria-hidden="true" />
+              <span>You're viewing the version from {{ formatRevisionDate(viewingHistoricalSnapshot?.timestamp ?? 0) }} - read-only.</span>
+              <button type="button" @click="returnToCurrent">Return to current</button>
+            </div>
             <label class="field subject-field">
               <span class="field-label">Title</span>
               <input
@@ -880,6 +1055,7 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
                 class="native-input subject-input"
                 placeholder="Document title"
                 type="text"
+                :readonly="isViewingHistorical"
               >
             </label>
             <MilkdownMarkdownEditor
@@ -887,6 +1063,7 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
               :on-image-upload="uploadEditorImage"
               :resolve-image-url="imageResolver.resolveImageUrl"
               :request-attachment-insert="requestAttachmentInsertFromEditor"
+              :readonly="isViewingHistorical"
               @update:model-value="onEditorUpdate"
             />
           </template>
@@ -898,10 +1075,11 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
 
       <DocumentAttachmentsPanel
         v-if="currentDocument"
-        :attachments="currentDocument.attachments ?? []"
+        :attachments="activeAttachments"
         :busy-action="attachmentBusyAction"
         :can-manage-attachments="canManageAttachments"
         :can-use-attachments="canUseAttachments"
+        :historical="isViewingHistorical"
         :upload-input-key="attachmentUploadInputKey"
         :can-preview-attachment="canPreviewAttachment"
         :format-attachment-size="formatAttachmentSize"
@@ -1024,10 +1202,19 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
 
     <AttachmentPickerDialog
       v-model:visible="attachmentPickerVisible"
-      :attachments="currentDocument?.attachments ?? []"
+      :attachments="activeAttachments"
       :resolve-image-url="imageResolver.resolveImageUrl"
       @select="handleAttachmentPickerSelect"
       @cancel="handleAttachmentPickerCancel"
+    />
+    <DocumentRevisionDialog
+      v-model:visible="revisionDialogVisible"
+      :entries="revisionEntries"
+      :loading="revisionLoading"
+      :error-message="revisionErrorMessage"
+      :current-revision-id="currentRevisionId"
+      @select="loadHistoricalRevision"
+      @cancel="revisionDialogVisible = false"
     />
   </main>
 </template>
@@ -1107,10 +1294,22 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
   color: var(--muted);
 }
 
-.toolbar__dirty {
+.toolbar__status-badge {
   padding: 0.12rem 0.42rem;
+  border: 0;
   border-radius: 999px;
   background: rgb(255 255 255 / 0.06);
+  color: inherit;
+  font: inherit;
+}
+
+button.toolbar__status-badge {
+  cursor: pointer;
+}
+
+button.toolbar__status-badge:hover,
+button.toolbar__status-badge:focus-visible {
+  background: rgb(255 255 255 / 0.12);
 }
 
 :deep(.toolbar__menubar .p-menubar-root-list) {
@@ -1224,6 +1423,32 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 1rem;
+}
+
+.editor-panel--history {
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+
+.history-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: rgb(255 255 255 / 0.04);
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.history-banner button {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
 }
 
 .preview-panel {

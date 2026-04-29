@@ -9,6 +9,7 @@ const props = defineProps<{
   busyAction: string | null;
   canManageAttachments: boolean;
   canUseAttachments: boolean;
+  historical?: boolean;
   uploadInputKey: number;
   canPreviewAttachment: (fileName: string, mimeType: string) => unknown;
   formatAttachmentSize: (size: number) => string;
@@ -99,7 +100,7 @@ function updateRemovalDialogVisible(visible: boolean) {
 <template>
   <section
     class="attachments-panel glass-card"
-    :class="{ 'attachments-panel--drag-active': dragActive }"
+    :class="{ 'attachments-panel--drag-active': dragActive && canManageAttachments }"
     @dragenter="handleDragEnter"
     @dragover="handleDragOver"
     @dragleave="handleDragLeave"
@@ -117,6 +118,9 @@ function updateRemovalDialogVisible(visible: boolean) {
           </template>
           <template v-else-if="busyAction">
             {{ busyAction }}...
+          </template>
+          <template v-else-if="historical">
+            Read-only - viewing a historical revision. You can still preview or download files.
           </template>
           <template v-else>
             This app can preview and download attachments, but cannot upload or remove them.

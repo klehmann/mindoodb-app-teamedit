@@ -1,5 +1,11 @@
 import { onBeforeUnmount, ref, type Ref } from "vue";
-import type { MindooDBAppDatabase, MindooDBAppDocument } from "mindoodb-app-sdk";
+import type {
+  MindooDBAppAttachmentInfo,
+  MindooDBAppDatabase,
+  MindooDBAppDocument,
+  MindooDBAppDocumentRevisionId,
+  MindooDBAppHistoricalDocument,
+} from "mindoodb-app-sdk";
 
 import {
   extractAttachmentMarkdownUrls,
@@ -10,7 +16,8 @@ import {
 
 export interface UseAttachmentImageResolverOptions {
   database: Ref<MindooDBAppDatabase | null>;
-  document: Ref<MindooDBAppDocument | null>;
+  document: Readonly<Ref<MindooDBAppDocument | MindooDBAppHistoricalDocument | null>>;
+  revisionId?: Ref<MindooDBAppDocumentRevisionId | null>;
 }
 
 /**
@@ -25,7 +32,8 @@ export function useAttachmentImageResolver(options: UseAttachmentImageResolverOp
   const pendingLoads = new Map<string, Promise<string>>();
 
   function findAttachmentMimeType(attachmentName: string) {
-    const attachment = options.document.value?.attachments?.find((entry) =>
+    const attachments: readonly MindooDBAppAttachmentInfo[] = options.document.value?.attachments ?? [];
+    const attachment = attachments.find((entry) =>
       entry.fileName === attachmentName || entry.attachmentId === attachmentName);
     return attachment?.mimeType || "application/octet-stream";
   }
@@ -55,7 +63,14 @@ export function useAttachmentImageResolver(options: UseAttachmentImageResolverOp
       return await pending;
     }
 
-    const load = readAttachmentBlob(database, document.id, attachmentName, findAttachmentMimeType(attachmentName))
+    const revisionId = options.revisionId?.value ?? undefined;
+    const load = readAttachmentBlob(
+      database,
+      document.id,
+      attachmentName,
+      findAttachmentMimeType(attachmentName),
+      revisionId ? { revisionId } : undefined,
+    )
       .then((blob) => {
         revokeCachedObjectUrl(attachmentName);
         const objectUrl = URL.createObjectURL(blob);

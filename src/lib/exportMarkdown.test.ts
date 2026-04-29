@@ -61,11 +61,13 @@ describe("exportMarkdown", () => {
       attachments: [
         { attachmentId: "attachment-1", fileName: "image.png", mimeType: "image/png", size: 2 },
       ],
+      revisionId: "rev-1",
     });
     const entries = unzipSync(packageBytes);
 
     expect(strFromU8(entries["document.md"])).toBe("![Image](attachments/image.png)");
     expect([...entries["attachments/image.png"]]).toEqual([104, 105]);
+    expect(database.attachments.openReadStream).toHaveBeenCalledWith("doc-1", "image.png", { revisionId: "rev-1" });
     expect(close).toHaveBeenCalled();
   });
 });

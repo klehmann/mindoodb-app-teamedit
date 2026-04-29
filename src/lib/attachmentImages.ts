@@ -1,4 +1,4 @@
-import type { MindooDBAppDatabase } from "mindoodb-app-sdk";
+import type { MindooDBAppAttachmentPreviewOptions, MindooDBAppDatabase } from "mindoodb-app-sdk";
 
 const ATTACHMENT_MARKDOWN_SCHEME = "mindoodb-attachment:";
 const DEFAULT_CHUNK_SIZE = 64 * 1024;
@@ -92,8 +92,9 @@ export async function readAttachmentBlob(
   docId: string,
   attachmentName: string,
   mimeType = "application/octet-stream",
+  options?: MindooDBAppAttachmentPreviewOptions,
 ) {
-  const stream = await database.attachments.openReadStream(docId, attachmentName);
+  const stream = await database.attachments.openReadStream(docId, attachmentName, options);
   const chunks: Uint8Array[] = [];
   try {
     for (;;) {

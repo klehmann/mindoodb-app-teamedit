@@ -14,7 +14,7 @@ If this is your first MindooDB app, the following 60-second crash course should 
 - A **MindooDB app** is just a regular static web app (HTML + JS + CSS). It does not talk to MindooDB or the database directly. Instead it talks to Haven through a JSON message bridge provided by the [`mindoodb-app-sdk`](https://github.com/klehmann/mindoodb-app-sdk). Haven is the only side that holds the real Automerge documents; the app only sees JSON snapshots.
 - A **document** is the unit of data inside a MindooDB database. It is a JSON-shaped object stored as an Automerge document, so it can be edited collaboratively. TeamEdit reads and writes the `body` field as a markdown string.
 - An **attachment** is a binary blob (image, PDF, anything) that "belongs" to a document. Haven streams attachment bytes over the bridge so apps never have to base64-encode files into JSON.
-- **Capabilities** are the permissions Haven grants the app for each mapped database (`read`, `create`, `update`, `delete`, `attachments`). The UI in TeamEdit is gated on those capabilities, so the same app code Just Works whether the host gave it read-only or full access.
+- **Capabilities** are the permissions Haven grants the app for each mapped database (`read`, `create`, `update`, `delete`, `attachments`, `history`). The UI in TeamEdit is gated on those capabilities, so the same app code Just Works whether the host gave it read-only or full access.
 - The **SDK bridge** is asynchronous and JSON-only. Apps don't ship Automerge or any database runtime. They just call SDK methods like `database.documents.get(id)` or `database.documents.update(id, { set: {…} })`.
 
 If you want a 5-minute tour of the SDK surface, browse [`mindoodb-app-sdk/README.md`](https://github.com/klehmann/mindoodb-app-sdk) — it covers everything below at a higher level.
@@ -28,6 +28,7 @@ If you want a 5-minute tour of the SDK surface, browse [`mindoodb-app-sdk/README
 - **MindooDoc attachments** for non-text data: a bottom dropzone panel for upload, preview, download, and delete.
 - **Attachment-backed markdown images** via Milkdown's image upload/proxy hooks. Images are stored as document attachments, the markdown stores a stable `mindoodb-attachment:` URL, and the app resolves it to a temporary `blob:` URL for the editor and preview pane.
 - **Capability-aware UI**: File / New, File / Save, File / Delete, and the attachment panel are gated by the SDK capabilities granted to the app.
+- **Read-only revision browsing** through the SDK history capability. TeamEdit shows a single status badge (`Current · Saved`, `Current · Unsaved`, or `Historical · <date>`) and opens selected revisions in the same Crepe editor with editing disabled.
 - **Host-aware UI preferences**: the toolbar reserves space on the left for iPadOS multitasking controls when Haven asks for it, and adapts to the small-screen PrimeVue mobile menu layout.
 - **Persistent UI preferences**: the preview pane visibility and right/bottom placement are stored in `localStorage`.
 
@@ -38,6 +39,7 @@ If you want a 5-minute tour of the SDK surface, browse [`mindoodb-app-sdk/README
 - **Live preview pane**: toggle the rendered preview on or off and place it to the right of the editor or below it. Editor-side image resizing (via the Crepe drag handle) is mirrored in the preview and the print view.
 - **Print view**: open a dedicated print window with sanitized rendered markdown, resolved attachment images, rendered Mermaid diagrams, print-focused styles, and asset loading before `window.print()`.
 - **Markdown export**: save the current document as a plain `.md` file or, when attachments exist, as a portable ZIP package containing rewritten markdown plus attachment files.
+- **Document revision history**: click the top-right status badge to browse timestamp-sorted revisions backed by stable MindooDB DAG revision IDs. Historical revisions are read-only, but print and export still work.
 - **Attachment panel**: upload files by dropzone, preview them in Haven, download them, delete them, and reuse uploaded files in the markdown body.
 - **Insert existing attachments from the editor**: a slash-menu **Attachment** action opens a picker dialog so you can drop a previously uploaded image or file into the markdown without re-uploading it.
 - **Theme integration**: follows Haven's light/dark theme mode and uses bundled editor fonts (`Inter`, `Rubik`, and `JetBrains Mono`) so deployed builds do not depend on third-party font CDNs.
@@ -152,6 +154,8 @@ TeamEdit treats binary content as MindooDoc attachments rather than embedding ba
 
 For display, a small image resolver loads each attachment as a `Blob`, creates a temporary `blob:` URL, and proxies it into the editor via Crepe's `proxyDomURL` hook. The same cached object URLs are reused by the markdown preview pane and the print window, so an attachment is downloaded at most once per session. Object URLs are revoked when the document is closed, refreshed, or deleted, keeping memory and IndexedDB blob references clean.
 
+When viewing a historical revision, the attachment panel switches to the revision's historical attachment list. Preview, download, print, and ZIP export pass the selected `revisionId` through the SDK so Haven resolves the attachment from that revision's `_attachments` array. This matters for attachments that grew over time: MindooDB appends chunks and stores the new `lastChunkId` in newer document revisions, so historical reads must start from the old `lastChunkId` to avoid reading bytes that did not exist yet.
+
 ### Why a custom URL scheme?
 
 Browser `blob:` URLs are session-local, so embedding them in the document body would break as soon as anyone reloads the page. Instead TeamEdit stores `mindoodb-attachment:<encoded-name>` in the markdown — a stable identifier that any peer can resolve back to a fresh `blob:` URL when they open the document. This keeps the markdown portable: when you export the document with attachments, the export pipeline rewrites those URLs into relative paths inside the ZIP package automatically.
@@ -165,6 +169,8 @@ TeamEdit has two export paths in the File menu:
 
 The export helper first tries the browser File System Access API (`showSaveFilePicker`) to display a native save dialog. Browsers without that API fall back to a regular single-file download. Attachment packages are generated client-side with `fflate`; no attachment bytes leave the browser except through the user's explicit export download.
 
+When you export from a historical revision, TeamEdit packages the historical markdown body together with the attachment versions referenced by that same revision.
+
 ## Project structure
 
 ```text
@@ -173,6 +179,7 @@ src/
   main.ts                                 Vue + PrimeVue + Crepe styles bootstrap
   components/
     AttachmentPickerDialog.vue            Slash-menu picker for inserting an existing attachment
+    DocumentRevisionDialog.vue            Revision picker opened from the status badge
     DocumentAttachmentsPanel.vue          Bottom dropzone panel with upload/preview/download
     MilkdownMarkdownEditor.vue            Crepe wrapper with image hooks, Mermaid previews, slash-menu items
   composables/
@@ -200,7 +207,7 @@ The collaborative text editing logic lives in `App.vue` together with the docume
 If you are using TeamEdit as a learning resource, a useful order to read the source in is:
 
 1. `src/main.ts` — bootstraps Vue, PrimeVue, the Crepe styles, and the Haven theme. Tiny, but the entry point.
-2. `src/App.vue` — the heart of the integration. Read the top-of-file imports, the `onMounted` Haven bridge bootstrap, and the `loadDocumentIntoEditor` / `saveFile` / `refreshCurrentDocument` functions; that's the SDK lifecycle in one screen.
+2. `src/App.vue` — the heart of the integration. Read the top-of-file imports, the `onMounted` Haven bridge bootstrap, and the `loadDocumentIntoEditor` / `saveFile` / `loadHistoricalRevision` / `refreshCurrentDocument` functions; that's the SDK lifecycle in one screen.
 3. `src/components/MilkdownMarkdownEditor.vue` — the editor wrapper. The `featureConfigs` block shows how to plug Crepe's image upload and slash menu into your own host code.
 4. `src/composables/useAttachmentImageResolver.ts` and `src/lib/attachmentImages.ts` — the attachment URL scheme and the small cache that powers images in the editor, preview, and print view.
 5. `src/lib/markdownRendering.ts` and `src/lib/printMarkdown.ts` — how the same renderer pipeline serves both the live preview pane and the print window.
@@ -224,7 +231,7 @@ npm run dev
 TeamEdit cannot run on its own — it needs Haven to host it. Once `npm run dev` is running:
 
 1. In Haven, open **Application settings** and register a new application pointing to `http://127.0.0.1:4206` (or the deployed URL of your TeamEdit instance).
-2. Map one or more databases to the app and grant capabilities. For the full TeamEdit experience you want `read`, `create`, `update`, `delete`, and `attachments`. Removing any of those capabilities is a useful way to see how the UI gracefully degrades.
+2. Map one or more databases to the app and grant capabilities. For the full TeamEdit experience you want `read`, `create`, `update`, `delete`, `attachments`, and `history`. Removing any of those capabilities is a useful way to see how the UI gracefully degrades.
 3. Launch TeamEdit from Haven. Use **File / New** to create an empty document or **File / Open** to pick an existing one.
 
 The Haven launcher embeds TeamEdit in a sandboxed iframe and feeds it a launch context (theme, capabilities, mapped databases). You can also launch TeamEdit on a separate browser window — TeamEdit's code adapts to either case automatically (`session.runtime` is `"iframe"` or `"window"`).
@@ -279,6 +286,7 @@ The Vitest suite covers the non-trivial pure helpers used by the attachment, ren
 
 - `src/lib/attachmentImages.test.ts` -- attachment URL scheme round-trip, file-name sanitization, markdown image URL extraction, formatted size, chunked upload over the SDK write stream, and read stream into a blob.
 - `src/lib/exportMarkdown.test.ts` -- export filename cleanup, ZIP attachment paths, markdown URL rewriting, and packaged attachment bytes.
+- `src/components/DocumentRevisionDialog.test.ts` -- revision selection, double-click open, and empty-state behavior.
 - `src/lib/markdownRendering.test.ts` -- Mermaid placeholder generation, non-Mermaid code fence preservation, image URL rewriting, Milkdown `<br>` normalization, and the Crepe ratio/caption translation used by the preview and print views.
 - `src/lib/mermaid.test.ts` -- Mermaid SVG sanitization and label conversion for Crepe previews.
 - `src/lib/printMarkdown.test.ts` -- print-window rendering, asset waiting, attachment image resolution, and Mermaid hydration.

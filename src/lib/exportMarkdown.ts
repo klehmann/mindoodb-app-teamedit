@@ -1,5 +1,9 @@
 import { zipSync } from "fflate";
-import type { MindooDBAppAttachmentInfo, MindooDBAppDatabase } from "mindoodb-app-sdk";
+import type {
+  MindooDBAppAttachmentInfo,
+  MindooDBAppDatabase,
+  MindooDBAppDocumentRevisionId,
+} from "mindoodb-app-sdk";
 
 import {
   parseAttachmentMarkdownUrl,
@@ -32,6 +36,7 @@ export interface ExportMarkdownPackageOptions {
   markdown: string;
   title: string;
   attachments: readonly MindooDBAppAttachmentInfo[];
+  revisionId?: MindooDBAppDocumentRevisionId;
 }
 
 export function createExportFileName(title: string, extension: "md" | "zip") {
@@ -178,14 +183,16 @@ async function readAttachmentForExport(
   database: MindooDBAppDatabase,
   documentId: string,
   attachment: MindooDBAppAttachmentInfo,
+  revisionId?: MindooDBAppDocumentRevisionId,
 ) {
+  const options = revisionId ? { revisionId } : undefined;
   try {
-    return await readAttachmentBlob(database, documentId, attachment.fileName, attachment.mimeType);
+    return await readAttachmentBlob(database, documentId, attachment.fileName, attachment.mimeType, options);
   } catch (error) {
     if (attachment.attachmentId === attachment.fileName) {
       throw error;
     }
-    return await readAttachmentBlob(database, documentId, attachment.attachmentId, attachment.mimeType);
+    return await readAttachmentBlob(database, documentId, attachment.attachmentId, attachment.mimeType, options);
   }
 }
 
@@ -204,7 +211,12 @@ export async function createMarkdownPackageBytes(options: ExportMarkdownPackageO
   };
 
   for (const entry of exportPlan) {
-    const blob = await readAttachmentForExport(options.database, options.documentId, entry.attachment);
+    const blob = await readAttachmentForExport(
+      options.database,
+      options.documentId,
+      entry.attachment,
+      options.revisionId,
+    );
     zipEntries[entry.exportPath] = new Uint8Array(await blob.arrayBuffer());
   }
 

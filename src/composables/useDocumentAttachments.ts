@@ -3,6 +3,8 @@ import {
   canPreviewAttachment,
   type MindooDBAppDatabase,
   type MindooDBAppDocument,
+  type MindooDBAppDocumentRevisionId,
+  type MindooDBAppHistoricalDocument,
   type MindooDBAppRuntime,
 } from "mindoodb-app-sdk";
 
@@ -15,9 +17,11 @@ import {
 
 export interface UseDocumentAttachmentsOptions {
   database: Ref<MindooDBAppDatabase | null>;
-  document: Ref<MindooDBAppDocument | null>;
+  document: Readonly<Ref<MindooDBAppDocument | MindooDBAppHistoricalDocument | null>>;
+  revisionId?: Ref<MindooDBAppDocumentRevisionId | null>;
   runtime: Ref<MindooDBAppRuntime>;
   setStatus(message: string): void;
+  onDocumentRefresh?(document: MindooDBAppDocument): void;
 }
 
 /**
@@ -38,7 +42,7 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
     }
     const refreshed = await database.documents.get(document.id);
     if (refreshed) {
-      options.document.value = refreshed;
+      options.onDocumentRefresh?.(refreshed);
     }
   }
 
@@ -74,6 +78,7 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
 
     busyAction.value = "Opening attachment preview";
     try {
+      const revisionId = options.revisionId?.value ?? undefined;
       if (options.runtime.value === "window" && typeof window !== "undefined") {
         const previewTab = window.open("", "_blank");
         if (!previewTab) {
@@ -81,7 +86,11 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
         }
         previewTab.document.title = "Opening attachment preview...";
         try {
-          const previewSession = await database.attachments.preparePreviewSession(document.id, attachmentName);
+          const previewSession = await database.attachments.preparePreviewSession(
+            document.id,
+            attachmentName,
+            revisionId ? { revisionId } : undefined,
+          );
           previewTab.location.href = previewSession.previewUrl;
         } catch (error) {
           previewTab.close();
@@ -90,7 +99,7 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
         return;
       }
 
-      await database.attachments.openPreview(document.id, attachmentName);
+      await database.attachments.openPreview(document.id, attachmentName, revisionId ? { revisionId } : undefined);
     } catch (error) {
       options.setStatus(error instanceof Error ? error.message : "The attachment preview could not be opened.");
     } finally {
@@ -109,7 +118,14 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
     try {
       const attachment = document.attachments?.find((entry) =>
         entry.fileName === attachmentName || entry.attachmentId === attachmentName);
-      const blob = await readAttachmentBlob(database, document.id, attachmentName, attachment?.mimeType);
+      const revisionId = options.revisionId?.value ?? undefined;
+      const blob = await readAttachmentBlob(
+        database,
+        document.id,
+        attachmentName,
+        attachment?.mimeType,
+        revisionId ? { revisionId } : undefined,
+      );
       const url = URL.createObjectURL(blob);
       const link = window.document.createElement("a");
       link.href = url;

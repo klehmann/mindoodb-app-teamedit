@@ -18,6 +18,7 @@ const props = defineProps<{
    * the insertion.
    */
   requestAttachmentInsert?: () => Promise<AttachmentInsertion | null>;
+  readonly?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -154,6 +155,7 @@ async function createEditor() {
     });
   });
   await editor.create();
+  editor.setReadonly?.(props.readonly ?? false);
 }
 
 async function recreateEditor() {
@@ -180,6 +182,13 @@ watch(
       return;
     }
     await recreateEditor();
+  },
+);
+
+watch(
+  () => props.readonly,
+  (value) => {
+    editor?.setReadonly?.(value ?? false);
   },
 );
 
