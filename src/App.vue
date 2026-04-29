@@ -1477,6 +1477,30 @@ button.toolbar__status-badge:focus-visible {
   color: var(--accent);
 }
 
+.markdown-preview :deep(table) {
+  width: 100%;
+  min-width: max(100%, 28rem);
+  table-layout: fixed;
+  border-collapse: collapse;
+  border: 1px solid var(--border);
+}
+
+.markdown-preview :deep(th),
+.markdown-preview :deep(td) {
+  min-width: 7rem;
+  height: 2rem;
+  padding: 4px 16px;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.markdown-preview :deep(th) {
+  background: rgb(255 255 255 / 0.04);
+  font-weight: 600;
+}
+
 .markdown-preview :deep(.teamedit-mermaid-figure) {
   margin: 1rem 0;
 }

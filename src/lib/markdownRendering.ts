@@ -28,6 +28,17 @@ export function createMermaidPlaceholderHtml(source: string) {
   ].join("");
 }
 
+function normalizeTableBreakMarkers(line: string) {
+  if (!line.includes("|") || !/<br\s*\/?>/i.test(line)) {
+    return line;
+  }
+
+  return line
+    .split("|")
+    .map((cell) => /^\s*<br\s*\/?>\s*$/i.test(cell) ? "" : cell)
+    .join("|");
+}
+
 export function normalizeMarkdownForRendering(markdown: string) {
   let inFence = false;
   let fenceMarker = "";
@@ -50,7 +61,7 @@ export function normalizeMarkdownForRendering(markdown: string) {
       if (!inFence && /^\s*<br\s*\/?>\s*$/i.test(line)) {
         return "";
       }
-      return line;
+      return inFence ? line : normalizeTableBreakMarkers(line);
     })
     .join("\n");
 }

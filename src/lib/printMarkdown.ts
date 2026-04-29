@@ -109,20 +109,26 @@ body {
 
 .${MARKDOWN_CONTENT_CLASS} table {
   width: 100%;
+  min-width: max(100%, 28rem);
+  table-layout: fixed;
   border-collapse: collapse;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #cbd5e1;
 }
 
 .${MARKDOWN_CONTENT_CLASS} th,
 .${MARKDOWN_CONTENT_CLASS} td {
-  padding: 0.65rem 0.8rem;
+  min-width: 7rem;
+  height: 2rem;
+  padding: 4px 16px;
   text-align: left;
   vertical-align: top;
-  border-bottom: 1px solid #e2e8f0;
+  border: 1px solid #cbd5e1;
+  overflow-wrap: anywhere;
 }
 
 .${MARKDOWN_CONTENT_CLASS} th {
   background: #f8fafc;
+  font-weight: 600;
 }
 
 .${MARKDOWN_CONTENT_CLASS} img,

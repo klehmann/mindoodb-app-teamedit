@@ -93,7 +93,7 @@ watch(
   >
     <div class="revision-dialog">
       <p class="revision-dialog__intro">
-        Pick a saved document revision to open it read-only. The list stays time-sorted, while each row loads by its stable revision id.
+        Pick a saved document revision to open it read-only.
       </p>
 
       <p v-if="loading" class="revision-dialog__state">Loading revisions...</p>

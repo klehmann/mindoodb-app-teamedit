@@ -48,6 +48,18 @@ describe("markdownRendering", () => {
     expect(html).toContain("<table>");
   });
 
+  it("normalizes Milkdown br markers inside table cells before rendering", () => {
+    const html = renderMarkdownFragment([
+      "| a | <br /> | <br> |",
+      "| - | - | - |",
+      "| <br /> | value | <br/> |",
+    ].join("\n"));
+
+    expect(html).toContain("<table>");
+    expect(html).toContain("<td>value</td>");
+    expect(html).not.toContain("&lt;br");
+  });
+
   it("does not normalize br markers inside fenced code blocks", () => {
     const markdown = "```html\n<br />\n```";
 
