@@ -23,8 +23,8 @@ If you want a 5-minute tour of the SDK surface, browse [`mindoodb-app-sdk/README
 
 - **Granular collaborative text editing over a JSON bridge** using `MindooDBTextBuffer` from the SDK.
 - **Save-time conflict resolution** based on the document's Automerge heads, performed by Haven on behalf of the app.
-- **A customized Milkdown / Crepe editor** with attachment-backed images, Mermaid diagram support, and app-owned typography/theme styling.
-- **Markdown preview and print rendering** using the same renderer pipeline as the editor, including attachment image URL resolution and hydrated Mermaid diagrams.
+- **A customized Milkdown / Crepe editor** with attachment-backed images, Mermaid diagram support, LaTeX authoring, and app-owned typography/theme styling.
+- **Markdown preview and print rendering** using the same renderer pipeline as the editor, including attachment image URL resolution, hydrated Mermaid diagrams, LaTeX math, syntax-highlighted code blocks, task lists, footnotes, and safe alignment wrappers.
 - **MindooDoc attachments** for non-text data: a bottom dropzone panel for upload, preview, download, and delete.
 - **Attachment-backed markdown images** via Milkdown's image upload/proxy hooks. Images are stored as document attachments, the markdown stores a stable `mindoodb-attachment:` URL, and the app resolves it to a temporary `blob:` URL for the editor and preview pane.
 - **Capability-aware UI**: File / New, File / Save, File / Delete, and the attachment panel are gated by the SDK capabilities granted to the app.
@@ -37,7 +37,7 @@ If you want a 5-minute tour of the SDK surface, browse [`mindoodb-app-sdk/README
 - **Document lifecycle actions**: create, open, refresh, save, inspect document metadata, delete, and print markdown documents from the File menu.
 - **Subject editing**: edit the document subject independently from the markdown body while saving both through MindooDB document updates.
 - **Live preview pane**: toggle the rendered preview on or off and place it to the right of the editor or below it. Editor-side image resizing (via the Crepe drag handle) is mirrored in the preview and the print view.
-- **Print view**: open a dedicated print window with sanitized rendered markdown, resolved attachment images, rendered Mermaid diagrams, print-focused styles, and asset loading before `window.print()`.
+- **Print view**: open a dedicated print window with sanitized rendered markdown, resolved attachment images, rendered Mermaid diagrams, KaTeX math, syntax-highlighted code blocks, task lists, footnotes, print-focused styles, and asset loading before `window.print()`.
 - **Markdown export**: save the current document as a plain `.md` file or, when attachments exist, as a portable ZIP package containing rewritten markdown plus attachment files.
 - **Document revision history**: click the top-right status badge to browse timestamp-sorted revisions backed by stable MindooDB DAG revision IDs. Historical revisions are read-only, but print and export still work.
 - **Attachment panel**: upload files by dropzone, preview them in Haven, download them, delete them, and reuse uploaded files in the markdown body.
@@ -144,6 +144,38 @@ TeamEdit uses Milkdown's Crepe editor as the editing surface, but extends it in 
 - **Image ratio handling in preview / print**: Crepe's image block stores the user's drag-handle resize ratio inside the markdown image's `alt` field (e.g. `![0.50](src "caption")`). TeamEdit's renderer translates that into a `data-teamedit-image-ratio` attribute, promotes the markdown title to a real `alt` for accessibility, and a small post-load helper applies the same height calculation Crepe uses, so resized images look identical in the editor, the preview pane, and the print view.
 - **App-owned editor theme**: TeamEdit imports Crepe's common structural CSS, then supplies its own Crepe color variables and typography. Headings use `Rubik`, body text uses `Inter`, and code uses `JetBrains Mono`.
 
+## Markdown preview, print, and portability
+
+TeamEdit stores the document body as plain Markdown, but the preview pane and print window use a shared renderer so common technical-documentation syntax looks like it does in the editor:
+
+- **Syntax highlighting**: fenced code blocks are highlighted with `highlight.js`, including common languages such as `markdown`, `ts`, `js`, `json`, `html`, and `css`.
+- **LaTeX math**: inline `$E = mc^2$` and display `$$ ... $$` math render through KaTeX.
+- **Mermaid diagrams**: ```` ```mermaid ```` fences render as sanitized SVG while preserving the original portable Markdown source.
+- **Task lists**: `[ ]`, `[x]`, and `[X]` list items render as disabled checkboxes in preview and print.
+- **Footnotes**: `[^1]` references and `[^1]: ...` definitions render as linked footnotes with backlinks.
+- **Safe alignment wrappers**: legacy snippets using `<div align="left">`, `<div align="center">`, or `<div align="right">` are converted to internal alignment classes. Arbitrary raw HTML is still disabled and escaped.
+
+For example:
+
+````markdown
+```ts
+const message = "Highlighted in preview and print";
+```
+
+Inline math: $E = mc^2$
+
+$$
+\int_{-\infty}^{\infty} e^{-x^2} dx = \sqrt{\pi}
+$$
+
+* [ ] To-do item
+* [x] Completed item
+
+This has a footnote.[^1]
+
+[^1]: Footnotes render at the bottom of the document.
+````
+
 ## Attachments and images
 
 TeamEdit treats binary content as MindooDoc attachments rather than embedding base64 in the markdown. Three different surfaces collaborate to make this feel seamless:
@@ -191,8 +223,8 @@ src/
     exportMarkdown.ts                     Browser save helpers, ZIP packaging, attachment URL rewriting
     exportMarkdown.test.ts                Focused tests for markdown and package export helpers
     imageRatio.ts                         Mirrors Crepe's drag-handle ratio in preview / print views
-    markdownRendering.ts                  Markdown-it renderer, attachment image rewriting, Mermaid placeholders
-    markdownRendering.test.ts             Renderer tests including ratio / caption translation
+    markdownRendering.ts                  Markdown-it renderer, math, code highlighting, task lists, footnotes, Mermaid placeholders
+    markdownRendering.test.ts             Renderer tests including math, highlighting, task lists, footnotes, alignment, ratio / caption translation
     mermaid.ts                            Lazy Mermaid renderer and sanitized SVG helpers
     printMarkdown.ts                      Print-window rendering with images, ratios and Mermaid hydration
     theme.ts                              Haven theme bootstrap
@@ -287,7 +319,7 @@ The Vitest suite covers the non-trivial pure helpers used by the attachment, ren
 - `src/lib/attachmentImages.test.ts` -- attachment URL scheme round-trip, file-name sanitization, markdown image URL extraction, formatted size, chunked upload over the SDK write stream, and read stream into a blob.
 - `src/lib/exportMarkdown.test.ts` -- export filename cleanup, ZIP attachment paths, markdown URL rewriting, and packaged attachment bytes.
 - `src/components/DocumentRevisionDialog.test.ts` -- revision selection, double-click open, and empty-state behavior.
-- `src/lib/markdownRendering.test.ts` -- Mermaid placeholder generation, non-Mermaid code fence preservation, image URL rewriting, Milkdown `<br>` normalization, and the Crepe ratio/caption translation used by the preview and print views.
+- `src/lib/markdownRendering.test.ts` -- Mermaid placeholder generation, syntax-highlighted code fences, KaTeX math, task lists, footnotes, safe alignment wrappers, image URL rewriting, Milkdown `<br>` normalization, and the Crepe ratio/caption translation used by the preview and print views.
 - `src/lib/mermaid.test.ts` -- Mermaid SVG sanitization and label conversion for Crepe previews.
 - `src/lib/printMarkdown.test.ts` -- print-window rendering, asset waiting, attachment image resolution, and Mermaid hydration.
 

@@ -1,4 +1,6 @@
 import { applyImageRatios } from "@/lib/imageRatio";
+import highlightStyles from "highlight.js/styles/github.css?inline";
+import katexStyles from "katex/dist/katex.min.css?inline";
 import {
   escapeHtml,
   MARKDOWN_CONTENT_CLASS,
@@ -8,6 +10,10 @@ import {
 import { renderMermaidPlaceholders } from "@/lib/mermaid";
 
 const PRINT_STYLES = `
+${highlightStyles}
+
+${katexStyles}
+
 :root {
   color-scheme: light;
 }
@@ -103,8 +109,66 @@ body {
 .${MARKDOWN_CONTENT_CLASS} pre {
   overflow-x: auto;
   padding: 0.9rem 1rem;
+  border: 1px solid #e2e8f0;
   border-radius: 0.8rem;
   background: #f1f5f9;
+}
+
+.${MARKDOWN_CONTENT_CLASS} pre code.hljs {
+  padding: 0;
+  background: transparent;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-align--left {
+  text-align: left;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-align--center {
+  text-align: center;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-align--right {
+  text-align: right;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-align ul,
+.${MARKDOWN_CONTENT_CLASS} .teamedit-align ol {
+  display: inline-block;
+  text-align: left;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-task-list {
+  padding-left: 1.35rem;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-task-list-item {
+  list-style: none;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-task-list-checkbox {
+  width: 1rem;
+  height: 1rem;
+  margin: 0 0.5rem 0 -1.35rem;
+  vertical-align: -0.15em;
+  accent-color: #2563eb;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .footnotes {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e2e8f0;
+  color: #475569;
+  font-size: 0.92em;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .footnotes ol {
+  padding-left: 1.35rem;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .footnote-ref,
+.${MARKDOWN_CONTENT_CLASS} .footnote-backref {
+  font-weight: 600;
+  text-decoration: none;
 }
 
 .${MARKDOWN_CONTENT_CLASS} table {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import "highlight.js/styles/github.css";
 import Button from "primevue/button";
 import Dialog from "primevue/dialog";
 import Menubar from "primevue/menubar";
@@ -1473,8 +1474,88 @@ button.toolbar__status-badge:focus-visible {
   line-height: 1.65;
 }
 
+.markdown-preview :deep(pre) {
+  overflow-x: auto;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgb(255 255 255 / 0.04);
+}
+
+.markdown-preview :deep(code) {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.markdown-preview :deep(:not(pre) > code) {
+  padding: 0.15rem 0.35rem;
+  border-radius: 0.35rem;
+  background: rgb(255 255 255 / 0.07);
+}
+
+.markdown-preview :deep(pre code.hljs) {
+  padding: 0;
+  background: transparent;
+}
+
 .markdown-preview :deep(a) {
   color: var(--accent);
+}
+
+.markdown-preview :deep(.teamedit-align--left) {
+  text-align: left;
+}
+
+.markdown-preview :deep(.teamedit-align--center) {
+  text-align: center;
+}
+
+.markdown-preview :deep(.teamedit-align--right) {
+  text-align: right;
+}
+
+.markdown-preview :deep(.teamedit-align ul),
+.markdown-preview :deep(.teamedit-align ol) {
+  display: inline-block;
+  text-align: left;
+}
+
+.markdown-preview :deep(.teamedit-task-list) {
+  padding-left: 1.35rem;
+}
+
+.markdown-preview :deep(.teamedit-task-list-item) {
+  list-style: none;
+}
+
+.markdown-preview :deep(.teamedit-task-list-checkbox) {
+  width: 1rem;
+  height: 1rem;
+  margin: 0 0.5rem 0 -1.35rem;
+  vertical-align: -0.15em;
+  accent-color: var(--accent);
+}
+
+.markdown-preview :deep(.footnotes) {
+  margin-top: 2rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.92em;
+}
+
+.markdown-preview :deep(.footnotes ol) {
+  padding-left: 1.35rem;
+}
+
+.markdown-preview :deep(.footnotes li:target) {
+  color: var(--text);
+}
+
+.markdown-preview :deep(.footnote-ref),
+.markdown-preview :deep(.footnote-backref) {
+  font-weight: 600;
+  text-decoration: none;
 }
 
 .markdown-preview :deep(table) {

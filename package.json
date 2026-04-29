@@ -25,7 +25,10 @@
     "@primeuix/themes": "^2.0.3",
     "dompurify": "^3.4.1",
     "fflate": "^0.8.2",
+    "highlight.js": "^11.11.1",
+    "katex": "^0.16.45",
     "markdown-it": "^14.1.0",
+    "markdown-it-footnote": "^4.0.0",
     "mermaid": "^11.14.0",
     "mindoodb-app-sdk": "0.0.16",
     "primeicons": "^7.0.0",
@@ -34,6 +37,7 @@
   },
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
+    "@types/markdown-it-footnote": "^3.0.4",
     "@types/node": "^25.5.0",
     "@vitejs/plugin-vue": "^6.0.5",
     "@vue/test-utils": "^2.4.6",
