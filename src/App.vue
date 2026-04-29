@@ -28,6 +28,7 @@ import {
   createUniqueImageAttachmentName,
   uploadFileAttachment,
 } from "@/lib/attachmentImages";
+import { exportMarkdownFile, exportMarkdownPackage } from "@/lib/exportMarkdown";
 import { createMarkdownRenderer, normalizeMarkdownForRendering } from "@/lib/markdownRendering";
 import { renderMermaidPlaceholders } from "@/lib/mermaid";
 import { renderAndPrintMarkdownWindow } from "@/lib/printMarkdown";
@@ -113,6 +114,10 @@ const canDelete = computed(() => Boolean(currentCanDelete.value && currentDataba
 const canRefresh = computed(() => Boolean(currentDatabase.value && currentDocument.value));
 const canShowInfo = computed(() => Boolean(currentDatabaseId.value && currentDocument.value));
 const canPrint = computed(() => Boolean(currentDocument.value));
+const canExportMarkdown = computed(() => Boolean(currentDocument.value));
+const hasAttachments = computed(() => (currentDocument.value?.attachments?.length ?? 0) > 0);
+const canExportMarkdownWithAttachments = computed(() =>
+  Boolean(currentDatabase.value && currentDocument.value && hasAttachments.value));
 const splitterLayout = computed(() => previewPanePosition.value === "bottom" ? "vertical" : "horizontal");
 const currentDatabaseLabel = computed(() => {
   const info = databases.value.find((database) => database.id === currentDatabaseId.value);
@@ -193,6 +198,23 @@ const menuItems = computed<MenuItem[]>(() => [
         disabled: !canPrint.value,
         command: () => {
           void printCurrentDocument();
+        },
+      },
+      {
+        label: "Export Markdown",
+        icon: "pi pi-file-export",
+        disabled: !canExportMarkdown.value,
+        command: () => {
+          void exportCurrentMarkdown();
+        },
+      },
+      {
+        label: "Export Markdown with attachments",
+        icon: "pi pi-file-export",
+        visible: hasAttachments.value,
+        disabled: !canExportMarkdownWithAttachments.value,
+        command: () => {
+          void exportCurrentMarkdownWithAttachments();
         },
       },
       { separator: true },
@@ -505,6 +527,56 @@ async function printCurrentDocument() {
   } catch (error) {
     printWindow.close();
     status.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+/** Export only the markdown text, preserving TeamEdit's stable attachment URLs. */
+async function exportCurrentMarkdown() {
+  if (!currentDocument.value) {
+    status.value = "Open a document before exporting.";
+    return;
+  }
+
+  try {
+    const saved = await exportMarkdownFile(markdown.value, subject.value || "Untitled document");
+    status.value = saved ? "Exported markdown file." : "Markdown export cancelled.";
+  } catch (error) {
+    status.value = error instanceof Error ? error.message : "The markdown export failed.";
+  }
+}
+
+/**
+ * Export a portable ZIP package.
+ *
+ * The package rewrites `mindoodb-attachment:` markdown image URLs to relative
+ * `attachments/...` paths and includes all current MindooDoc attachments. This
+ * keeps the exported markdown useful outside Haven while still preserving the
+ * simple markdown-only export above for people who want the raw document body.
+ */
+async function exportCurrentMarkdownWithAttachments() {
+  if (!currentDatabase.value || !currentDocument.value) {
+    status.value = "Open a document before exporting attachments.";
+    return;
+  }
+
+  const attachments = currentDocument.value.attachments ?? [];
+  if (attachments.length === 0) {
+    status.value = "This document has no attachments to export.";
+    return;
+  }
+
+  try {
+    status.value = "Preparing markdown export package...";
+    const saved = await exportMarkdownPackage({
+      database: currentDatabase.value,
+      documentId: currentDocument.value.id,
+      markdown: markdown.value,
+      title: subject.value || "Untitled document",
+      attachments,
+    });
+    status.value = saved ? "Exported markdown package." : "Markdown package export cancelled.";
+  } catch (error) {
+    status.value = error instanceof Error ? error.message : "The markdown package export failed.";
   }
 }
 

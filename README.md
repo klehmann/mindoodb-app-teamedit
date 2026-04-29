@@ -10,11 +10,23 @@ TeamEdit is intentionally small and well-commented so other developers can use i
 
 - **Granular collaborative text editing over a JSON bridge** using `MindooDBTextBuffer` from the SDK.
 - **Save-time conflict resolution** based on the document's Automerge heads, performed by Haven on behalf of the app.
+- **A customized Milkdown / Crepe editor** with attachment-backed images, Mermaid diagram support, and app-owned typography/theme styling.
+- **Markdown preview and print rendering** using the same renderer pipeline as the editor, including attachment image URL resolution and hydrated Mermaid diagrams.
 - **MindooDoc attachments** for non-text data: a bottom dropzone panel for upload, preview, download, and delete.
 - **Attachment-backed markdown images** via Milkdown's image upload/proxy hooks. Images are stored as document attachments, the markdown stores a stable `mindoodb-attachment:` URL, and the app resolves it to a temporary `blob:` URL for the editor and preview pane.
 - **Capability-aware UI**: File / New, File / Save, File / Delete, and the attachment panel are gated by the SDK capabilities granted to the app.
 - **Host-aware UI preferences**: the toolbar reserves space on the left for iPadOS multitasking controls when Haven asks for it, and adapts to the small-screen PrimeVue mobile menu layout.
 - **Persistent UI preferences**: the preview pane visibility and right/bottom placement are stored in `localStorage`.
+
+## TeamEdit features
+
+- **Document lifecycle actions**: create, open, refresh, save, inspect document metadata, delete, and print markdown documents from the File menu.
+- **Subject editing**: edit the document subject independently from the markdown body while saving both through MindooDB document updates.
+- **Live preview pane**: toggle the rendered preview on or off and place it to the right of the editor or below it.
+- **Print view**: open a dedicated print window with sanitized rendered markdown, resolved attachment images, rendered Mermaid diagrams, print-focused styles, and asset loading before `window.print()`.
+- **Markdown export**: save the current document as a plain `.md` file or, when attachments exist, as a portable ZIP package containing rewritten markdown plus attachment files.
+- **Attachment panel**: upload files by dropzone, preview them in Haven, download them, delete them, and reuse uploaded files as markdown images.
+- **Theme integration**: follows Haven's light/dark theme mode and uses bundled editor fonts (`Inter`, `Rubik`, and `JetBrains Mono`) so deployed builds do not depend on third-party font CDNs.
 
 ## Architecture overview
 
@@ -104,6 +116,16 @@ This keeps the bridge purely JSON, so apps never have to ship an Automerge runti
 
 If you want to inspect the merge result without saving, use the **Refresh** action in the toolbar to re-read the canonical document from Haven.
 
+## Milkdown editor extensions
+
+TeamEdit uses Milkdown's Crepe editor as the editing surface, but extends it in a few app-specific places:
+
+- **Image upload / proxy hooks**: Crepe's image block feature is connected to MindooDB attachments. Uploads stream into the current document and the editor receives a stable `mindoodb-attachment:` markdown URL; display uses Crepe's `proxyDomURL` hook to resolve that stable URL to a temporary object URL.
+- **Mermaid code fence previews**: fenced code blocks with the `mermaid` language render as diagrams. Inside the editor, TeamEdit customizes Crepe's CodeMirror preview renderer; in the preview pane and print window, the markdown renderer emits hydratable placeholders that are rendered with Mermaid after the HTML is mounted.
+- **Diagram slash-menu entry**: the block edit menu gets a TeamEdit-specific **Diagram** action that inserts a starter Mermaid flowchart fence.
+- **Safe diagram rendering**: Mermaid output is sanitized before insertion. For editor previews, foreign-object labels are converted to SVG text so diagrams render reliably inside Crepe's preview surface.
+- **App-owned editor theme**: TeamEdit imports Crepe's common structural CSS, then supplies its own Crepe color variables and typography. Headings use `Rubik`, body text uses `Inter`, and code uses `JetBrains Mono`.
+
 ## Attachments and images
 
 TeamEdit treats binary content as MindooDoc attachments rather than embedding base64 in the markdown.
@@ -113,6 +135,15 @@ TeamEdit treats binary content as MindooDoc attachments rather than embedding ba
 - For display, a small image resolver loads the attachment as a `Blob`, creates a temporary `blob:` URL, and proxies it into the editor via Crepe's `proxyDomURL` hook. The same cached object URLs are also used by the markdown preview pane.
 - Object URLs are revoked when the document is closed, refreshed, or deleted, so memory and IndexedDB blob references stay clean.
 
+## Markdown export
+
+TeamEdit has two export paths in the File menu:
+
+- **Export Markdown** writes the current editor body to a `.md` file. This preserves TeamEdit's stable `mindoodb-attachment:` URLs exactly as stored in the document, which is useful for backups or debugging the raw markdown.
+- **Export Markdown with attachments** is shown only when the current document has attachments. It writes a ZIP package with `document.md` and an `attachments/` folder. The exported `document.md` rewrites TeamEdit attachment URLs to relative package paths such as `attachments/teamedit-images/photo.png`, so the markdown can be opened outside Haven together with its files.
+
+The export helper first tries the browser File System Access API (`showSaveFilePicker`) to display a native save dialog. Browsers without that API fall back to a regular single-file download. Attachment packages are generated client-side with `fflate`; no attachment bytes leave the browser except through the user's explicit export download.
+
 ## Project structure
 
 ```text
@@ -121,19 +152,24 @@ src/
   main.ts                                 Vue + PrimeVue + Crepe styles bootstrap
   components/
     DocumentAttachmentsPanel.vue          Bottom dropzone panel with upload/preview/download
-    MilkdownMarkdownEditor.vue            Crepe wrapper exposing onUpload / proxyDomURL props
+    MilkdownMarkdownEditor.vue            Crepe wrapper with image hooks and Mermaid editor previews
   composables/
     useAttachmentImageResolver.ts         Caches attachment blob URLs, preloads markdown images
     useDocumentAttachments.ts             Wraps SDK attachment API for upload, preview, download, delete
   lib/
     attachmentImages.ts                   Pure helpers: URL scheme, file naming, stream IO, formatting
     attachmentImages.test.ts              Focused tests for the helpers
+    exportMarkdown.ts                     Browser save helpers, ZIP packaging, attachment URL rewriting
+    exportMarkdown.test.ts                Focused tests for markdown and package export helpers
+    markdownRendering.ts                  Markdown-it renderer, attachment image rewriting, Mermaid placeholders
+    mermaid.ts                            Lazy Mermaid renderer and sanitized SVG helpers
+    printMarkdown.ts                      Print-window rendering with images and Mermaid hydration
     theme.ts                              Haven theme bootstrap
   assets/styles/                          App theme styling
   env.d.ts                                Side-effect CSS module declarations
 ```
 
-The collaborative text editing logic lives in `App.vue` together with the document lifecycle (open, refresh, save, delete). The attachment work is split into composables and a focused panel component so each integration point is easy to study independently.
+The collaborative text editing logic lives in `App.vue` together with the document lifecycle (open, refresh, save, print, export, delete). The attachment work is split into composables and a focused panel component so each integration point is easy to study independently. Rendering and export helpers live under `src/lib/` so the editor preview pane, print window, and downloaded packages share the same markdown, image, and Mermaid behavior.
 
 ## Development
 
@@ -192,9 +228,13 @@ This runs `vue-tsc --noEmit && vite build` and then `wrangler deploy`, uploading
 
 ## Testing
 
-The Vitest suite covers the non-trivial pure helpers used by the attachment and image flow:
+The Vitest suite covers the non-trivial pure helpers used by the attachment, rendering, Mermaid, and print flows:
 
 - `src/lib/attachmentImages.test.ts` -- attachment URL scheme round-trip, file-name sanitization, markdown image URL extraction, formatted size, chunked upload over the SDK write stream, and read stream into a blob.
+- `src/lib/exportMarkdown.test.ts` -- export filename cleanup, ZIP attachment paths, markdown URL rewriting, and packaged attachment bytes.
+- `src/lib/markdownRendering.test.ts` -- Mermaid placeholder generation, non-Mermaid code fence preservation, image URL rewriting, and Milkdown `<br>` normalization.
+- `src/lib/mermaid.test.ts` -- Mermaid SVG sanitization and label conversion for Crepe previews.
+- `src/lib/printMarkdown.test.ts` -- print-window rendering, asset waiting, attachment image resolution, and Mermaid hydration.
 
 Run them with:
 
