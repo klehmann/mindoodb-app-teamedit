@@ -1,5 +1,11 @@
 <script setup lang="ts">
+import { commandsCtx } from "@milkdown/kit/core";
+import { clearTextInCurrentBlockCommand } from "@milkdown/kit/preset/commonmark";
+import { insert } from "@milkdown/kit/utils";
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+
+import { escapeHtml } from "@/lib/markdownRendering";
+import { isMermaidLanguage, MERMAID_PLACEHOLDER_CLASS, renderMermaidSvg } from "@/lib/mermaid";
 
 const props = defineProps<{
   modelValue: string;
@@ -15,6 +21,21 @@ const root = ref<HTMLElement | null>(null);
 let editor: any = null;
 let applyingExternalValue = false;
 let editorGeneration = 0;
+
+const MERMAID_TEMPLATE = "```mermaid\nflowchart TD\n  A[Start] --> B[Next step]\n```";
+const diagramIcon = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+    <path d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6ZM8 10h2v2h4v2h2v-2h2v-2h-4V8h-2v2H8v2Z"/>
+  </svg>
+`;
+
+function createMermaidMessageHtml(message: string, tone: "muted" | "error" = "muted") {
+  return [
+    `<div class="${MERMAID_PLACEHOLDER_CLASS}">`,
+    `<p class="teamedit-mermaid-message teamedit-mermaid-message--${tone}">${escapeHtml(message)}</p>`,
+    `</div>`,
+  ].join("");
+}
 
 onMounted(createEditor);
 
@@ -32,6 +53,40 @@ async function createEditor() {
     root: root.value,
     defaultValue: props.modelValue,
     featureConfigs: {
+      [Crepe.Feature.CodeMirror]: {
+        renderPreview(language: string, content: string, applyPreview: (value: null | string | HTMLElement) => void) {
+          if (!isMermaidLanguage(language)) {
+            return null;
+          }
+          applyPreview(createMermaidMessageHtml("Loading Mermaid preview..."));
+          void renderMermaidSvg(content, {
+            idPrefix: "teamedit-editor-mermaid",
+            convertLabelsToSvgText: true,
+          })
+            .then((svg) => {
+              applyPreview(`<div class="${MERMAID_PLACEHOLDER_CLASS}">${svg}</div>`);
+            })
+            .catch((error) => {
+              applyPreview(createMermaidMessageHtml(
+                error instanceof Error ? error.message : "Unable to render Mermaid diagram.",
+                "error",
+              ));
+            });
+          return undefined;
+        },
+      },
+      [Crepe.Feature.BlockEdit]: {
+        buildMenu(builder: any) {
+          builder.addGroup("diagram", "Diagram").addItem("mermaid", {
+            label: "Diagram",
+            icon: diagramIcon,
+            onRun(ctx: any) {
+              ctx.get(commandsCtx).call(clearTextInCurrentBlockCommand.key);
+              insert(MERMAID_TEMPLATE)(ctx);
+            },
+          });
+        },
+      },
       [Crepe.Feature.ImageBlock]: {
         // Crepe stores the returned URL in markdown. TeamEdit returns stable
         // MindooDB attachment URLs here, not temporary object URLs.
@@ -94,7 +149,202 @@ onBeforeUnmount(async () => {
 }
 
 :deep(.milkdown) {
+  height: 100%;
   min-height: 100%;
+  overflow: auto;
   border-radius: var(--radius-md);
+  background: var(--crepe-color-background);
+  color: var(--crepe-color-on-background);
+  font-family: var(--crepe-font-default);
+}
+
+:deep(.milkdown .ProseMirror) {
+  min-height: 100%;
+  padding: clamp(1.5rem, 6vw, 3.75rem) clamp(1rem, 10vw, 7.5rem);
+  outline: none;
+}
+
+:deep(.milkdown .ProseMirror ::selection) {
+  background: var(--crepe-color-selected);
+}
+
+:deep(.milkdown .ProseMirror h1),
+:deep(.milkdown .ProseMirror h2),
+:deep(.milkdown .ProseMirror h3),
+:deep(.milkdown .ProseMirror h4),
+:deep(.milkdown .ProseMirror h5),
+:deep(.milkdown .ProseMirror h6) {
+  padding: 2px 0;
+  color: var(--crepe-color-on-background);
+  font-family: var(--crepe-font-title);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+:deep(.milkdown .ProseMirror h1) {
+  margin-top: 32px;
+  font-size: 42px;
+  line-height: 50px;
+}
+
+:deep(.milkdown .ProseMirror h2) {
+  margin-top: 28px;
+  font-size: 36px;
+  line-height: 44px;
+}
+
+:deep(.milkdown .ProseMirror h3) {
+  margin-top: 24px;
+  font-size: 32px;
+  line-height: 40px;
+}
+
+:deep(.milkdown .ProseMirror h4) {
+  margin-top: 20px;
+  font-size: 28px;
+  line-height: 36px;
+}
+
+:deep(.milkdown .ProseMirror h5) {
+  margin-top: 16px;
+  font-size: 24px;
+  line-height: 32px;
+}
+
+:deep(.milkdown .ProseMirror h6) {
+  margin-top: 16px;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 28px;
+}
+
+:deep(.milkdown .ProseMirror p) {
+  padding: 4px 0;
+  font-size: 16px;
+  line-height: 24px;
+}
+
+:deep(.milkdown .ProseMirror a) {
+  color: var(--crepe-color-primary);
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+
+:deep(.milkdown .ProseMirror code) {
+  display: inline-block;
+  padding: 0 0.2em;
+  border-radius: 4px;
+  background: var(--crepe-color-inline-area);
+  color: var(--crepe-color-inline-code);
+  font-family: var(--crepe-font-code);
+  font-size: 87.5%;
+  line-height: 1.4286;
+}
+
+:deep(.milkdown .ProseMirror pre) {
+  margin: 4px 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--crepe-color-inline-area);
+}
+
+:deep(.milkdown .ProseMirror pre code) {
+  display: block;
+  padding: 0;
+  background: transparent;
+  color: var(--crepe-color-on-background);
+}
+
+:deep(.milkdown .ProseMirror blockquote) {
+  position: relative;
+  margin: 4px 0;
+  padding: 0 0 0 40px;
+  color: var(--crepe-color-on-surface-variant);
+}
+
+:deep(.milkdown .ProseMirror blockquote::before) {
+  content: "";
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 0;
+  width: 4px;
+  border-radius: 999px;
+  background: var(--crepe-color-selected);
+}
+
+:deep(.milkdown .ProseMirror hr) {
+  height: 13px;
+  padding: 6px 0;
+  border: 0;
+  background-color: color-mix(in srgb, var(--crepe-color-outline), transparent 80%);
+  background-clip: content-box;
+}
+
+:deep(.milkdown .ProseMirror img) {
+  max-width: 100%;
+  vertical-align: bottom;
+}
+
+:deep(.milkdown .milkdown-table-block td),
+:deep(.milkdown .milkdown-table-block th) {
+  border-color: color-mix(in srgb, var(--crepe-color-outline), transparent 70%);
+  padding: 6px 16px;
+}
+
+:deep(.milkdown .milkdown-toolbar),
+:deep(.milkdown .milkdown-slash-menu),
+:deep(.milkdown .milkdown-link-preview > .link-preview),
+:deep(.milkdown .milkdown-link-edit > .link-edit) {
+  border: 1px solid color-mix(in srgb, var(--crepe-color-outline), transparent 78%);
+}
+
+@media (max-width: 720px) {
+  :deep(.milkdown .ProseMirror) {
+    padding: 1.25rem 1rem;
+  }
+
+  :deep(.milkdown .ProseMirror h1) {
+    font-size: 34px;
+    line-height: 42px;
+  }
+
+  :deep(.milkdown .ProseMirror h2) {
+    font-size: 30px;
+    line-height: 38px;
+  }
+
+  :deep(.milkdown .ProseMirror h3) {
+    font-size: 26px;
+    line-height: 34px;
+  }
+}
+
+:deep(.teamedit-mermaid-placeholder) {
+  display: grid;
+  justify-items: center;
+  min-height: 6rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgb(255 255 255 / 0.04);
+}
+
+:deep(.teamedit-mermaid-placeholder pre) {
+  display: none;
+}
+
+:deep(.teamedit-mermaid-placeholder svg) {
+  max-width: 100%;
+  height: auto;
+}
+
+:deep(.teamedit-mermaid-message) {
+  margin: 0;
+  color: var(--muted);
+}
+
+:deep(.teamedit-mermaid-message--error) {
+  color: var(--danger);
 }
 </style>

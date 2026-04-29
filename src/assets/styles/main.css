@@ -12,7 +12,7 @@
   --shadow: 0 28px 80px rgba(1, 5, 16, 0.45);
   --radius-lg: 24px;
   --radius-md: 16px;
-  font-family:
+  --font-body:
     Inter,
     ui-sans-serif,
     system-ui,
@@ -20,6 +20,21 @@
     BlinkMacSystemFont,
     "Segoe UI",
     sans-serif;
+  --font-title:
+    Rubik,
+    Cambria,
+    "Times New Roman",
+    Times,
+    serif;
+  --font-code:
+    "JetBrains Mono",
+    Menlo,
+    Monaco,
+    "Courier New",
+    Courier,
+    monospace;
+  font-family:
+    var(--font-body);
 }
 
 :root[data-theme="light"] {
@@ -32,6 +47,53 @@
   --text: #17233b;
   --muted: #667795;
   --shadow: 0 28px 80px rgba(45, 65, 110, 0.16);
+}
+
+.milkdown {
+  --crepe-color-background: rgb(11 16 32 / 0.34);
+  --crepe-color-on-background: var(--text);
+  --crepe-color-surface: rgb(12 18 34 / 0.94);
+  --crepe-color-surface-low: rgb(27 39 70 / 0.72);
+  --crepe-color-on-surface: var(--text);
+  --crepe-color-on-surface-variant: var(--muted);
+  --crepe-color-outline: rgb(167 180 207 / 0.52);
+  --crepe-color-primary: var(--accent);
+  --crepe-color-secondary: rgb(212 160 23 / 0.16);
+  --crepe-color-on-secondary: var(--text);
+  --crepe-color-inverse: var(--text);
+  --crepe-color-on-inverse: var(--bg);
+  --crepe-color-inline-code: #f6b4ac;
+  --crepe-color-error: #f87171;
+  --crepe-color-hover: rgb(255 255 255 / 0.06);
+  --crepe-color-selected: rgb(212 160 23 / 0.2);
+  --crepe-color-inline-area: rgb(255 255 255 / 0.08);
+  --crepe-font-title: var(--font-title);
+  --crepe-font-default: var(--font-body);
+  --crepe-font-code: var(--font-code);
+  --crepe-shadow-1: 0 12px 32px rgb(1 5 16 / 0.32), 0 1px 2px rgb(1 5 16 / 0.32);
+  --crepe-shadow-2: 0 18px 48px rgb(1 5 16 / 0.38), 0 2px 6px rgb(1 5 16 / 0.28);
+}
+
+:root[data-theme="light"] .milkdown {
+  --crepe-color-background: rgb(255 255 255 / 0.72);
+  --crepe-color-on-background: var(--text);
+  --crepe-color-surface: rgb(255 255 255 / 0.96);
+  --crepe-color-surface-low: rgb(244 247 255 / 0.96);
+  --crepe-color-on-surface: var(--text);
+  --crepe-color-on-surface-variant: var(--muted);
+  --crepe-color-outline: rgb(31 58 138 / 0.26);
+  --crepe-color-primary: #8b650d;
+  --crepe-color-secondary: rgb(212 160 23 / 0.16);
+  --crepe-color-on-secondary: #17233b;
+  --crepe-color-inverse: #17233b;
+  --crepe-color-on-inverse: #ffffff;
+  --crepe-color-inline-code: #ba1a1a;
+  --crepe-color-error: #ba1a1a;
+  --crepe-color-hover: rgb(31 58 138 / 0.06);
+  --crepe-color-selected: rgb(212 160 23 / 0.18);
+  --crepe-color-inline-area: rgb(31 58 138 / 0.08);
+  --crepe-shadow-1: 0 12px 32px rgb(45 65 110 / 0.14), 0 1px 2px rgb(45 65 110 / 0.12);
+  --crepe-shadow-2: 0 18px 48px rgb(45 65 110 / 0.16), 0 2px 6px rgb(45 65 110 / 0.12);
 }
 
 * {

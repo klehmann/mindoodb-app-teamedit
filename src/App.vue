@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import Button from "primevue/button";
 import Dialog from "primevue/dialog";
 import Menubar from "primevue/menubar";
 import Splitter from "primevue/splitter";
 import SplitterPanel from "primevue/splitterpanel";
-import MarkdownIt from "markdown-it";
 import type { MenuItem } from "primevue/menuitem";
 import {
   createMindooDBAppBridge,
@@ -29,13 +28,10 @@ import {
   createUniqueImageAttachmentName,
   uploadFileAttachment,
 } from "@/lib/attachmentImages";
+import { createMarkdownRenderer, normalizeMarkdownForRendering } from "@/lib/markdownRendering";
+import { renderMermaidPlaceholders } from "@/lib/mermaid";
+import { renderAndPrintMarkdownWindow } from "@/lib/printMarkdown";
 import { applyAppTheme } from "@/lib/theme";
-
-const markdownIt = new MarkdownIt({
-  html: false,
-  linkify: true,
-  typographer: true,
-});
 
 const PREVIEW_PANE_SETTINGS_KEY = "mindoodb-teamedit-preview-pane";
 
@@ -89,10 +85,12 @@ const infoDialogVisible = ref(false);
 const deleteConfirmVisible = ref(false);
 const showPreviewPane = ref(previewPaneSettings.showPreviewPane);
 const previewPanePosition = ref<PreviewPanePosition>(previewPaneSettings.previewPanePosition);
+const previewRoot = ref<HTMLElement | null>(null);
 const selectedOpenDocId = ref("");
 const copiedInfoLabel = ref<string | null>(null);
 let cleanupTheme: (() => void) | null = null;
 let cleanupUiPreferences: (() => void) | null = null;
+let previewRenderGeneration = 0;
 
 // Programmatic updates from load/reconcile must not be recorded as fresh local
 // edits, otherwise opening a document or accepting merged content would mark it
@@ -114,6 +112,7 @@ const canSave = computed(() => Boolean(hasLocalEdits.value && currentCanUpdate.v
 const canDelete = computed(() => Boolean(currentCanDelete.value && currentDatabase.value && currentDocument.value));
 const canRefresh = computed(() => Boolean(currentDatabase.value && currentDocument.value));
 const canShowInfo = computed(() => Boolean(currentDatabaseId.value && currentDocument.value));
+const canPrint = computed(() => Boolean(currentDocument.value));
 const splitterLayout = computed(() => previewPanePosition.value === "bottom" ? "vertical" : "horizontal");
 const currentDatabaseLabel = computed(() => {
   const info = databases.value.find((database) => database.id === currentDatabaseId.value);
@@ -149,21 +148,13 @@ const {
   },
 });
 
-const defaultImageRenderer = markdownIt.renderer.rules.image
-  ?? ((tokens, index, options, _env, self) => self.renderToken(tokens, index, options));
-markdownIt.renderer.rules.image = (tokens, index, options, env, self) => {
-  const token = tokens[index];
-  const srcIndex = token.attrIndex("src");
-  if (srcIndex >= 0 && token.attrs?.[srcIndex]) {
-    const src = token.attrs[srcIndex][1];
-    token.attrs[srcIndex][1] = imageResolver.getCachedImageUrl(src);
-  }
-  return defaultImageRenderer(tokens, index, options, env, self);
-};
+const markdownIt = createMarkdownRenderer({
+  resolveImageUrl: (url) => imageResolver.getCachedImageUrl(url),
+});
 
 const renderedMarkdown = computed(() => {
   imageResolver.revision.value;
-  return markdownIt.render(markdown.value || "");
+  return markdownIt.render(normalizeMarkdownForRendering(markdown.value || ""));
 });
 
 const menuItems = computed<MenuItem[]>(() => [
@@ -194,6 +185,14 @@ const menuItems = computed<MenuItem[]>(() => [
         command: () => {
           copiedInfoLabel.value = null;
           infoDialogVisible.value = true;
+        },
+      },
+      {
+        label: "Print",
+        icon: "pi pi-print",
+        disabled: !canPrint.value,
+        command: () => {
+          void printCurrentDocument();
         },
       },
       { separator: true },
@@ -292,6 +291,25 @@ watch(
     void imageResolver.preloadMarkdownImages(markdown.value);
   },
   { immediate: true },
+);
+
+async function renderPreviewMermaidDiagrams() {
+  const generation = ++previewRenderGeneration;
+  await nextTick();
+  if (generation !== previewRenderGeneration || !previewRoot.value) {
+    return;
+  }
+  await renderMermaidPlaceholders(previewRoot.value, {
+    idPrefix: "teamedit-preview-mermaid",
+  });
+}
+
+watch(
+  () => [renderedMarkdown.value, showPreviewPane.value] as const,
+  () => {
+    void renderPreviewMermaidDiagrams();
+  },
+  { flush: "post", immediate: true },
 );
 
 watch(
@@ -461,6 +479,33 @@ async function copyInfoValue(value: string, label: string) {
   copiedInfoLabel.value = copyWithTextareaFallback(value)
     ? `${label} copied.`
     : `${label} could not be copied.`;
+}
+
+async function printCurrentDocument() {
+  if (!currentDocument.value) {
+    status.value = "Open a document before printing.";
+    return;
+  }
+
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    status.value = "Pop-up blocked. Allow pop-ups for this app to print the document.";
+    return;
+  }
+
+  try {
+    status.value = "Preparing print view...";
+    await imageResolver.preloadMarkdownImages(markdown.value);
+    await renderAndPrintMarkdownWindow(printWindow, {
+      title: subject.value || "Untitled document",
+      markdown: markdown.value,
+      resolveImageUrl: (url) => imageResolver.getCachedImageUrl(url),
+    });
+    status.value = "Print view opened.";
+  } catch (error) {
+    printWindow.close();
+    status.value = error instanceof Error ? error.message : String(error);
+  }
 }
 
 /**
@@ -679,7 +724,7 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
           <SplitterPanel :size="previewPanePosition === 'bottom' ? 40 : 38" :min-size="20" class="splitter-panel">
             <section class="preview-panel glass-card">
               <p class="eyebrow">Preview</p>
-              <article class="markdown-preview" v-html="renderedMarkdown" />
+              <article ref="previewRoot" class="markdown-preview" v-html="renderedMarkdown" />
             </section>
           </SplitterPanel>
         </Splitter>
@@ -1054,6 +1099,38 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
 
 .markdown-preview :deep(a) {
   color: var(--accent);
+}
+
+.markdown-preview :deep(.teamedit-mermaid-figure) {
+  margin: 1rem 0;
+}
+
+.markdown-preview :deep(.teamedit-mermaid-placeholder) {
+  display: grid;
+  justify-items: center;
+  min-height: 6rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgb(255 255 255 / 0.04);
+}
+
+.markdown-preview :deep(.teamedit-mermaid-placeholder pre) {
+  display: none;
+}
+
+.markdown-preview :deep(.teamedit-mermaid-placeholder svg) {
+  max-width: 100%;
+  height: auto;
+}
+
+.markdown-preview :deep(.teamedit-mermaid-message) {
+  margin: 0;
+  color: var(--muted);
+}
+
+.markdown-preview :deep(.teamedit-mermaid-message--error) {
+  color: var(--danger);
 }
 
 .empty-state {

@@ -93,7 +93,12 @@ export async function readAttachmentBlob(
   } finally {
     await stream.close();
   }
-  return new Blob(chunks, { type: mimeType });
+  const blobParts: BlobPart[] = chunks.map((chunk) => {
+    const copy = new Uint8Array(chunk.byteLength);
+    copy.set(chunk);
+    return copy.buffer as ArrayBuffer;
+  });
+  return new Blob(blobParts, { type: mimeType });
 }
 
 /** Extracts TeamEdit attachment image URLs from markdown so previews can preload them. */

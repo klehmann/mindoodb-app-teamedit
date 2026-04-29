@@ -17,10 +17,15 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "@fontsource/jetbrains-mono": "^5.2.8",
+    "@fontsource/rubik": "^5.2.8",
     "@milkdown/crepe": "^7.17.1",
     "@primeuix/styled": "^0.7.4",
     "@primeuix/themes": "^2.0.3",
+    "dompurify": "^3.4.1",
     "markdown-it": "^14.1.0",
+    "mermaid": "^11.14.0",
     "mindoodb-app-sdk": "0.0.14",
     "primeicons": "^7.0.0",
     "primevue": "^4.5.4",
@@ -38,5 +43,8 @@
     "vitest": "^4.1.2",
     "vue-tsc": "^3.2.6",
     "wrangler": "^4.83.0"
+  },
+  "overrides": {
+    "uuid": "^14.0.0"
   }
 }
