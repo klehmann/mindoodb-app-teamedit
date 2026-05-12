@@ -68,6 +68,28 @@ describe("markdownRendering", () => {
     expect(html).not.toContain("[x] Completed item");
   });
 
+  it("renders GFM tables with alignment", () => {
+    const html = renderMarkdownFragment([
+      "| Left | Center | Right |",
+      "| :--- | :----: | ----: |",
+      "| a | b | c |",
+    ].join("\n"));
+
+    expect(html).toContain("<table>");
+    expect(html).toContain("<th style=\"text-align:left\">Left</th>");
+    expect(html).toContain("<th style=\"text-align:center\">Center</th>");
+    expect(html).toContain("<th style=\"text-align:right\">Right</th>");
+    expect(html).toContain("<td style=\"text-align:right\">c</td>");
+  });
+
+  it("renders GFM strikethrough and autolinks", () => {
+    const html = renderMarkdownFragment("Visit https://mindoo.com and ~~remove this~~.");
+
+    expect(html).toContain("<a href=\"https://mindoo.com\">https://mindoo.com</a>");
+    expect(html).toContain("<del>remove this</del>");
+    expect(html).not.toContain("~~remove this~~");
+  });
+
   it("renders footnote references and definitions", () => {
     const html = renderMarkdownFragment([
       "This editor is a game-changer[^1].",
@@ -99,7 +121,7 @@ describe("markdownRendering", () => {
     ].join("\n"));
 
     expect(html).toContain("<div class=\"teamedit-align teamedit-align--center\">");
-    expect(html).toContain("<h3>Centered Title</h3>");
+    expect(html).toContain("<h3 id=\"centered-title\" class=\"teamedit-heading\">Centered Title</h3>");
     expect(html).toContain("<strong>Centered</strong> list item");
     expect(html).toContain("&lt;script&gt;alert");
     expect(html).not.toContain("<script>");
@@ -123,6 +145,68 @@ describe("markdownRendering", () => {
     expect(html).toContain("<strong>Right aligned</strong>");
     expect(html).not.toContain("align=\"left\"");
     expect(html).not.toContain("align=\"right\"");
+  });
+
+  it("adds stable, duplicate-aware heading anchors", () => {
+    const html = renderMarkdownFragment([
+      "## Roadmap",
+      "",
+      "### Roadmap",
+      "",
+      "## Roadmap!",
+    ].join("\n"));
+
+    expect(html).toContain("<h2 id=\"roadmap\" class=\"teamedit-heading\">Roadmap</h2>");
+    expect(html).toContain("<h3 id=\"roadmap-1\" class=\"teamedit-heading\">Roadmap</h3>");
+    expect(html).toContain("<h2 id=\"roadmap-2\" class=\"teamedit-heading\">Roadmap!</h2>");
+  });
+
+  it("renders highlight, subscript, and superscript inline formatting", () => {
+    const html = renderMarkdownFragment("Use ==highlight==, H~2~O, and x^2^.");
+
+    expect(html).toContain("<mark>highlight</mark>");
+    expect(html).toContain("H<sub>2</sub>O");
+    expect(html).toContain("x<sup>2</sup>");
+  });
+
+  it("normalizes Crepe-escaped formatting markers before rendering", () => {
+    const html = renderMarkdownFragment("Use \\=\\=highlight\\=\\=, H\\~2\\~O, and x\\^2\\^.");
+
+    expect(html).toContain("<mark>highlight</mark>");
+    expect(html).toContain("H<sub>2</sub>O");
+    expect(html).toContain("x<sup>2</sup>");
+  });
+
+  it("normalizes Crepe-escaped highlight marker pairs before rendering", () => {
+    const html = renderMarkdownFragment("Use \\==highlight\\==.");
+
+    expect(html).toContain("<mark>highlight</mark>");
+  });
+
+  it("renders callout containers with markdown content safely", () => {
+    const html = renderMarkdownFragment([
+      ":::warning Check this",
+      "**Important:** review <script>alert('xss')</script> before saving.",
+      ":::",
+    ].join("\n"));
+
+    expect(html).toContain("<aside class=\"teamedit-callout teamedit-callout--warning\">");
+    expect(html).toContain("<p class=\"teamedit-callout-title\">Check this</p>");
+    expect(html).toContain("<strong>Important:</strong>");
+    expect(html).toContain("&lt;script&gt;alert");
+    expect(html).not.toContain("<script>");
+  });
+
+  it("normalizes Crepe-escaped callout markers before rendering", () => {
+    const html = renderMarkdownFragment([
+      "\\:\\:\\:tip Heads up",
+      "Callout body.",
+      "\\:\\:\\:",
+    ].join("\n"));
+
+    expect(html).toContain("<aside class=\"teamedit-callout teamedit-callout--tip\">");
+    expect(html).toContain("<p class=\"teamedit-callout-title\">Heads up</p>");
+    expect(html).toContain("Callout body.");
   });
 
   it("escapes Mermaid source before embedding it in placeholders", () => {

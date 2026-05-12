@@ -10,6 +10,7 @@ export const MARKDOWN_CONTENT_CLASS = "teamedit-markdown-content";
 type StateCore = Parameters<MarkdownIt["core"]["ruler"]["push"]>[1] extends (state: infer State, ...args: never[]) => unknown ? State : never;
 type StateBlock = Parameters<MarkdownIt["block"]["ruler"]["push"]>[1] extends (state: infer State, ...args: never[]) => unknown ? State : never;
 type StateInline = Parameters<MarkdownIt["inline"]["ruler"]["push"]>[1] extends (state: infer State, ...args: never[]) => unknown ? State : never;
+type MarkdownToken = StateCore["tokens"][number];
 
 export interface MarkdownRenderOptions {
   resolveImageUrl?: (url: string) => string;
@@ -67,11 +68,100 @@ function renderHighlightedCode(source: string, language: string) {
   return `<pre><code class="hljs${languageClass}">${code}</code></pre>\n`;
 }
 
-function attrJoinUnique(token: StateCore["tokens"][number], name: string, value: string) {
+function attrJoinUnique(token: MarkdownToken, name: string, value: string) {
   const existing = token.attrGet(name)?.split(/\s+/).filter(Boolean) ?? [];
   if (!existing.includes(value)) {
     token.attrJoin(name, value);
   }
+}
+
+function findInlineDelimiterEnd(source: string, delimiter: string, start: number) {
+  for (let index = start; index < source.length;) {
+    const candidate = source.indexOf(delimiter, index);
+    if (candidate < 0) {
+      return -1;
+    }
+    if (source[candidate - 1] !== "\\") {
+      return candidate;
+    }
+    index = candidate + delimiter.length;
+  }
+  return -1;
+}
+
+function delimitedInlineRule(
+  state: StateInline,
+  silent: boolean,
+  delimiter: string,
+  tokenName: string,
+  tagName: string,
+) {
+  const start = state.pos;
+  const source = state.src;
+  if (!source.startsWith(delimiter, start) || source[start - 1] === "\\") {
+    return false;
+  }
+
+  const contentStart = start + delimiter.length;
+  const end = findInlineDelimiterEnd(source, delimiter, contentStart);
+  if (end < 0 || !source.slice(contentStart, end).trim()) {
+    return false;
+  }
+
+  if (!silent) {
+    const previousPosMax = state.posMax;
+    const openToken = state.push(`${tokenName}_open`, tagName, 1);
+    openToken.markup = delimiter;
+    state.pos = contentStart;
+    state.posMax = end;
+    state.md.inline.tokenize(state);
+    const closeToken = state.push(`${tokenName}_close`, tagName, -1);
+    closeToken.markup = delimiter;
+    state.posMax = previousPosMax;
+  }
+  state.pos = end + delimiter.length;
+  return true;
+}
+
+function highlightInlineRule(state: StateInline, silent: boolean) {
+  return delimitedInlineRule(state, silent, "==", "teamedit_highlight", "mark");
+}
+
+function strikethroughInlineRule(state: StateInline, silent: boolean) {
+  return delimitedInlineRule(state, silent, "~~", "teamedit_strikethrough", "del");
+}
+
+function subscriptInlineRule(state: StateInline, silent: boolean) {
+  const source = state.src;
+  if (source[state.pos + 1] === "~") {
+    return false;
+  }
+  return delimitedInlineRule(state, silent, "~", "teamedit_subscript", "sub");
+}
+
+function superscriptInlineRule(state: StateInline, silent: boolean) {
+  return delimitedInlineRule(state, silent, "^", "teamedit_superscript", "sup");
+}
+
+function createHeadingSlug(text: string) {
+  return text
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9 _-]+/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "") || "heading";
+}
+
+function uniqueHeadingSlug(env: unknown, text: string) {
+  const headingEnv = env as { teameditHeadingSlugs?: Map<string, number> };
+  headingEnv.teameditHeadingSlugs ??= new Map<string, number>();
+  const baseSlug = createHeadingSlug(text);
+  const usedCount = headingEnv.teameditHeadingSlugs.get(baseSlug) ?? 0;
+  headingEnv.teameditHeadingSlugs.set(baseSlug, usedCount + 1);
+  return usedCount === 0 ? baseSlug : `${baseSlug}-${usedCount}`;
 }
 
 function taskListRule(state: StateCore) {
@@ -232,6 +322,43 @@ function alignDivBlockRule(state: StateBlock, startLine: number, endLine: number
   return true;
 }
 
+function calloutBlockRule(state: StateBlock, startLine: number, endLine: number, silent: boolean) {
+  const start = state.bMarks[startLine] + state.tShift[startLine];
+  const max = state.eMarks[startLine];
+  const firstLine = state.src.slice(start, max);
+  const match = firstLine.match(/^:::\s*(note|info|tip|warning|danger|caution|important)(?:\s+(.*))?$/i);
+  if (!match) {
+    return false;
+  }
+
+  let nextLine = startLine + 1;
+  for (; nextLine < endLine; nextLine += 1) {
+    const lineStart = state.bMarks[nextLine] + state.tShift[nextLine];
+    const lineEnd = state.eMarks[nextLine];
+    const line = state.src.slice(lineStart, lineEnd);
+    if (/^:::\s*$/.test(line)) {
+      break;
+    }
+  }
+  if (nextLine >= endLine) {
+    return false;
+  }
+
+  if (silent) {
+    return true;
+  }
+
+  const kind = match[1].toLowerCase();
+  const token = state.push("teamedit_callout", "aside", 0);
+  token.block = true;
+  token.content = state.getLines(startLine + 1, nextLine, state.blkIndent, false);
+  token.info = match[2]?.trim() || kind;
+  token.attrSet("data-teamedit-callout", kind);
+  token.map = [startLine, nextLine + 1];
+  state.line = nextLine + 1;
+  return true;
+}
+
 function normalizeTableBreakMarkers(line: string) {
   if (!line.includes("|") || !/<br\s*\/?>/i.test(line)) {
     return line;
@@ -241,6 +368,14 @@ function normalizeTableBreakMarkers(line: string) {
     .split("|")
     .map((cell) => /^\s*<br\s*\/?>\s*$/i.test(cell) ? "" : cell)
     .join("|");
+}
+
+function normalizeEscapedFormattingMarkers(line: string) {
+  return line
+    .replaceAll("\\=\\=", "==")
+    .replaceAll("\\==", "==")
+    .replace(/^(\s*)\\:\\:\\:/, "$1:::")
+    .replace(/\\([~^])/g, "$1");
 }
 
 export function normalizeMarkdownForRendering(markdown: string) {
@@ -265,7 +400,7 @@ export function normalizeMarkdownForRendering(markdown: string) {
       if (!inFence && /^\s*<br\s*\/?>\s*$/i.test(line)) {
         return "";
       }
-      return inFence ? line : normalizeTableBreakMarkers(line);
+      return inFence ? line : normalizeEscapedFormattingMarkers(normalizeTableBreakMarkers(line));
     })
     .join("\n");
 }
@@ -281,18 +416,50 @@ export function createMarkdownRenderer(options: MarkdownRenderOptions = {}) {
   renderer.block.ruler.before("paragraph", "teamedit_align_center", alignDivBlockRule, {
     alt: ["paragraph", "reference", "blockquote", "list"],
   });
+  renderer.block.ruler.before("paragraph", "teamedit_callout", calloutBlockRule, {
+    alt: ["paragraph", "reference", "blockquote", "list"],
+  });
   renderer.block.ruler.before("fence", "math_block", mathBlockRule, {
     alt: ["paragraph", "reference", "blockquote", "list"],
   });
   renderer.inline.ruler.after("escape", "math_inline", mathInlineRule);
+  renderer.inline.ruler.after("emphasis", "teamedit_highlight", highlightInlineRule);
+  renderer.inline.ruler.after("teamedit_highlight", "teamedit_strikethrough", strikethroughInlineRule);
+  renderer.inline.ruler.after("teamedit_strikethrough", "teamedit_subscript", subscriptInlineRule);
+  renderer.inline.ruler.after("teamedit_subscript", "teamedit_superscript", superscriptInlineRule);
   renderer.core.ruler.after("inline", "teamedit_task_lists", taskListRule);
 
   renderer.renderer.rules.math_block = (tokens, index) =>
     `<div class="katex-display">${renderLatex(tokens[index].content, true)}</div>\n`;
   renderer.renderer.rules.math_inline = (tokens, index) => renderLatex(tokens[index].content, false);
+  renderer.renderer.rules.s_open = () => "<del>";
+  renderer.renderer.rules.s_close = () => "</del>";
+  renderer.renderer.rules.heading_open = (tokens, index, renderOptions, env, self) => {
+    const inlineToken = tokens[index + 1];
+    if (inlineToken?.type === "inline") {
+      const headingText = self.renderInlineAsText(inlineToken.children ?? [], renderOptions, env);
+      tokens[index].attrSet("id", uniqueHeadingSlug(env, headingText));
+      attrJoinUnique(tokens[index], "class", "teamedit-heading");
+    }
+    return self.renderToken(tokens, index, renderOptions);
+  };
   renderer.renderer.rules.teamedit_align_center = (tokens, index, renderOptions, env) => {
     const alignment = tokens[index].attrGet("data-teamedit-align") ?? "center";
     return `<div class="teamedit-align teamedit-align--${alignment}">\n${renderer.render(normalizeMarkdownForRendering(tokens[index].content), env)}\n</div>\n`;
+  };
+  renderer.renderer.rules.teamedit_callout = (tokens, index, _renderOptions, env) => {
+    const kind = tokens[index].attrGet("data-teamedit-callout") ?? "note";
+    const title = tokens[index].info || kind;
+    const titleHtml = renderer.renderInline(title, env);
+    const contentHtml = renderer.render(normalizeMarkdownForRendering(tokens[index].content), env);
+    return [
+      `<aside class="teamedit-callout teamedit-callout--${escapeHtml(kind)}">`,
+      `<p class="teamedit-callout-title">${titleHtml}</p>`,
+      `<div class="teamedit-callout-body">`,
+      contentHtml,
+      `</div>`,
+      `</aside>\n`,
+    ].join("\n");
   };
   renderer.renderer.rules.list_item_open = (tokens, index, renderOptions, env, self) => {
     const token = tokens[index];

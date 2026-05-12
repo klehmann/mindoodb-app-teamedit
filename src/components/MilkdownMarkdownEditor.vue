@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { commandsCtx } from "@milkdown/kit/core";
+import { commandsCtx, editorViewCtx } from "@milkdown/kit/core";
 import { clearTextInCurrentBlockCommand } from "@milkdown/kit/preset/commonmark";
 import { insert } from "@milkdown/kit/utils";
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
@@ -31,14 +31,35 @@ let applyingExternalValue = false;
 let editorGeneration = 0;
 
 const MERMAID_TEMPLATE = "```mermaid\nflowchart TD\n  A[Start] --> B[Next step]\n```";
+const CALLOUT_TEMPLATE = ":::note Note\nWrite callout content here.\n:::";
 const diagramIcon = `
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
     <path d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6ZM8 10h2v2h4v2h2v-2h2v-2h-4V8h-2v2H8v2Z"/>
   </svg>
 `;
+const calloutIcon = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+    <path d="M4 4h16v16H4V4Zm2 2v12h12V6H6Zm2 2h8v2H8V8Zm0 4h5v2H8v-2Z"/>
+  </svg>
+`;
 const attachmentIcon = `
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
     <path d="M16.5 6.5v9.75a4.75 4.75 0 0 1-9.5 0V5.5a3.25 3.25 0 0 1 6.5 0v10.25a1.75 1.75 0 0 1-3.5 0V7H11v8.75a.75.75 0 0 0 1.5 0V5.5a1.75 1.75 0 0 0-3.5 0v10.75a3.25 3.25 0 0 0 6.5 0V6.5h1Z"/>
+  </svg>
+`;
+const highlightIcon = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+    <path d="M5 18h14v2H5v-2Zm2.8-2 7.7-7.7-2.8-2.8L5 13.2V16h2.8ZM14.1 4.1l1.4-1.4a1 1 0 0 1 1.4 0l1.4 1.4a1 1 0 0 1 0 1.4l-1.4 1.4-2.8-2.8Z"/>
+  </svg>
+`;
+const subscriptIcon = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+    <path d="m5 6 4 5-4 5h2.5l2.7-3.5L13 16h2.5l-4-5 4-5H13l-2.8 3.5L7.5 6H5Zm11 9h3c.6 0 1 .4 1 1v1c0 .6-.4 1-1 1h-2v1h3v2h-5v-3c0-.6.4-1 1-1h2v-1h-3v-1Z"/>
+  </svg>
+`;
+const superscriptIcon = `
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+    <path d="m5 8 4 5-4 5h2.5l2.7-3.5L13 18h2.5l-4-5 4-5H13l-2.8 3.5L7.5 8H5Zm11-5h3c.6 0 1 .4 1 1v1c0 .6-.4 1-1 1h-2v1h3v2h-5V6c0-.6.4-1 1-1h2V4h-3V3Z"/>
   </svg>
 `;
 
@@ -58,6 +79,24 @@ function buildAttachmentMarkdown(result: AttachmentInsertion) {
   const alt = escapeMarkdownAlt(result.alt || "");
   const url = escapeMarkdownUrl(result.url);
   return result.isImage ? `![${alt}](${url})` : `[${alt || url}](${url})`;
+}
+
+function wrapSelectionWithMarkdown(ctx: any, before: string, after = before) {
+  const view = ctx.get(editorViewCtx);
+  const { state } = view;
+  const { from, to } = state.selection;
+  const selectedText = state.doc.textBetween(from, to, "\n");
+  if (!selectedText) {
+    return;
+  }
+
+  view.dispatch(
+    state.tr
+      .insertText(after, to)
+      .insertText(before, from)
+      .scrollIntoView(),
+  );
+  view.focus();
 }
 
 function createMermaidMessageHtml(message: string, tone: "muted" | "error" = "muted") {
@@ -106,8 +145,39 @@ async function createEditor() {
           return undefined;
         },
       },
+      [Crepe.Feature.Toolbar]: {
+        buildToolbar(builder: any) {
+          builder.addGroup("teamedit-format", "TeamEdit").addItem("highlight", {
+            icon: highlightIcon,
+            active: () => false,
+            onRun(ctx: any) {
+              wrapSelectionWithMarkdown(ctx, "==");
+            },
+          }).addItem("subscript", {
+            icon: subscriptIcon,
+            active: () => false,
+            onRun(ctx: any) {
+              wrapSelectionWithMarkdown(ctx, "~");
+            },
+          }).addItem("superscript", {
+            icon: superscriptIcon,
+            active: () => false,
+            onRun(ctx: any) {
+              wrapSelectionWithMarkdown(ctx, "^");
+            },
+          });
+        },
+      },
       [Crepe.Feature.BlockEdit]: {
         buildMenu(builder: any) {
+          builder.getGroup("advanced").addItem("callout", {
+            label: "Callout",
+            icon: calloutIcon,
+            onRun(ctx: any) {
+              ctx.get(commandsCtx).call(clearTextInCurrentBlockCommand.key);
+              insert(CALLOUT_TEMPLATE)(ctx);
+            },
+          });
           builder.addGroup("diagram", "Diagram").addItem("mermaid", {
             label: "Diagram",
             icon: diagramIcon,

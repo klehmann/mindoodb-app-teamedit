@@ -21,6 +21,7 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/rubik": "^5.2.8",
     "@milkdown/crepe": "^7.17.1",
+    "@milkdown/kit": "7.21.0",
     "@primeuix/styled": "^0.7.4",
     "@primeuix/themes": "^2.0.3",
     "dompurify": "^3.4.1",
@@ -31,6 +32,7 @@
     "markdown-it-footnote": "^4.0.0",
     "mermaid": "^11.14.0",
     "mindoodb-app-sdk": "0.0.16",
+    "mindoodb-view-language": "0.0.11",
     "primeicons": "^7.0.0",
     "primevue": "^4.5.4",
     "vue": "^3.5.31"
@@ -38,7 +40,7 @@
   "devDependencies": {
     "@types/markdown-it": "^14.1.2",
     "@types/markdown-it-footnote": "^3.0.4",
-    "@types/node": "^25.5.0",
+    "@types/node": "25.5.0",
     "@vitejs/plugin-vue": "^6.0.5",
     "@vue/test-utils": "^2.4.6",
     "jsdom": "^29.0.1",

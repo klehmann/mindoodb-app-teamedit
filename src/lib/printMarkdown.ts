@@ -153,6 +153,22 @@ body {
   accent-color: #2563eb;
 }
 
+.${MARKDOWN_CONTENT_CLASS} .teamedit-heading {
+  scroll-margin-top: 1.5rem;
+}
+
+.${MARKDOWN_CONTENT_CLASS} mark {
+  padding: 0.05rem 0.25rem;
+  border-radius: 0.3rem;
+  background: #fef3c7;
+  color: #78350f;
+}
+
+.${MARKDOWN_CONTENT_CLASS} sub,
+.${MARKDOWN_CONTENT_CLASS} sup {
+  line-height: 0;
+}
+
 .${MARKDOWN_CONTENT_CLASS} .footnotes {
   margin-top: 2rem;
   padding-top: 1rem;
@@ -169,6 +185,41 @@ body {
 .${MARKDOWN_CONTENT_CLASS} .footnote-backref {
   font-weight: 600;
   text-decoration: none;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-callout {
+  margin: 1rem 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid #cbd5e1;
+  border-left: 4px solid #2563eb;
+  border-radius: 0.8rem;
+  background: #f8fafc;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-callout--tip {
+  border-left-color: #059669;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-callout--warning,
+.${MARKDOWN_CONTENT_CLASS} .teamedit-callout--caution {
+  border-left-color: #d97706;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-callout--danger {
+  border-left-color: #dc2626;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-callout-title {
+  margin: 0 0 0.5rem;
+  font-weight: 700;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-callout-body > :first-child {
+  margin-top: 0;
+}
+
+.${MARKDOWN_CONTENT_CLASS} .teamedit-callout-body > :last-child {
+  margin-bottom: 0;
 }
 
 .${MARKDOWN_CONTENT_CLASS} table {

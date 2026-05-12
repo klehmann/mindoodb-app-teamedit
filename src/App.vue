@@ -1702,6 +1702,22 @@ button.toolbar__status-badge:focus-visible {
   color: var(--accent);
 }
 
+.markdown-preview :deep(.teamedit-heading) {
+  scroll-margin-top: 1.5rem;
+}
+
+.markdown-preview :deep(mark) {
+  padding: 0.05rem 0.25rem;
+  border-radius: 0.3rem;
+  background: rgb(212 160 23 / 0.32);
+  color: var(--text);
+}
+
+.markdown-preview :deep(sub),
+.markdown-preview :deep(sup) {
+  line-height: 0;
+}
+
 .markdown-preview :deep(.teamedit-align--left) {
   text-align: left;
 }
@@ -1756,6 +1772,41 @@ button.toolbar__status-badge:focus-visible {
 .markdown-preview :deep(.footnote-backref) {
   font-weight: 600;
   text-decoration: none;
+}
+
+.markdown-preview :deep(.teamedit-callout) {
+  margin: 1rem 0;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: rgb(255 255 255 / 0.04);
+}
+
+.markdown-preview :deep(.teamedit-callout--tip) {
+  border-left-color: #34d399;
+}
+
+.markdown-preview :deep(.teamedit-callout--warning),
+.markdown-preview :deep(.teamedit-callout--caution) {
+  border-left-color: #f59e0b;
+}
+
+.markdown-preview :deep(.teamedit-callout--danger) {
+  border-left-color: #f87171;
+}
+
+.markdown-preview :deep(.teamedit-callout-title) {
+  margin: 0 0 0.5rem;
+  font-weight: 700;
+}
+
+.markdown-preview :deep(.teamedit-callout-body > :first-child) {
+  margin-top: 0;
+}
+
+.markdown-preview :deep(.teamedit-callout-body > :last-child) {
+  margin-bottom: 0;
 }
 
 .markdown-preview :deep(table) {
