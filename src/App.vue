@@ -15,11 +15,11 @@ import {
   type MindooDBAppDocument,
   type MindooDBAppDocumentHistoryEntry,
   type MindooDBAppDocumentRevisionId,
-  type MindooDBAppDocumentSummary,
   type MindooDBAppHistoricalDocument,
   type MindooDBAppRuntime,
   type MindooDBAppSession,
   type MindooDBAppUiPreferences,
+  type MindooDBAppViewNavigator,
   type MindooDBTextBuffer,
 } from "mindoodb-app-sdk";
 
@@ -27,6 +27,7 @@ import AttachmentPickerDialog from "@/components/AttachmentPickerDialog.vue";
 import DocumentAttachmentsPanel from "@/components/DocumentAttachmentsPanel.vue";
 import DocumentRevisionDialog from "@/components/DocumentRevisionDialog.vue";
 import MilkdownMarkdownEditor from "@/components/MilkdownMarkdownEditor.vue";
+import TagTreeList from "@/components/TagTreeList.vue";
 import { useAttachmentImageResolver } from "@/composables/useAttachmentImageResolver";
 import { useDocumentAttachments } from "@/composables/useDocumentAttachments";
 import {
@@ -35,12 +36,23 @@ import {
   createUniqueImageAttachmentName,
   uploadFileAttachment,
 } from "@/lib/attachmentImages";
+import { normalizeTags, readTags as readDocumentTags } from "@/lib/documentTags";
 import { exportMarkdownFile, exportMarkdownPackage } from "@/lib/exportMarkdown";
 import { applyImageRatios } from "@/lib/imageRatio";
 import { createMarkdownRenderer, normalizeMarkdownForRendering } from "@/lib/markdownRendering";
 import { renderMermaidPlaceholders } from "@/lib/mermaid";
 import { renderAndPrintMarkdownWindow } from "@/lib/printMarkdown";
 import { applyAppTheme } from "@/lib/theme";
+import {
+  ALL_DOCUMENTS_NODE_KEY,
+  buildOpenCategoryTree,
+  collectNavigatorEntries,
+  createOpenViewDefinition,
+  dedupeDocumentEntries,
+  mapDocumentEntries,
+  type OpenCategoryNode,
+  type OpenDocumentRow,
+} from "@/lib/viewOpen";
 
 const PREVIEW_PANE_SETTINGS_KEY = "mindoodb-teamedit-preview-pane";
 
@@ -69,9 +81,9 @@ const previewPaneSettings = readPreviewPaneSettings();
 // Bridge/session state is kept in this root component because TeamEdit is a
 // small sample app with one active document at a time.
 const session = ref<MindooDBAppSession | null>(null);
+const launchTimeTravelDate = ref<number | null>(null);
 const databases = ref<MindooDBAppDatabaseInfo[]>([]);
 const selectedDatabaseId = ref("");
-const documents = ref<MindooDBAppDocumentSummary[]>([]);
 const currentDatabase = ref<MindooDBAppDatabase | null>(null);
 const currentDatabaseId = ref("");
 const currentDocument = ref<MindooDBAppDocument | null>(null);
@@ -87,9 +99,12 @@ const textBuffer = ref<MindooDBTextBuffer | null>(null);
 const markdown = ref("");
 const subject = ref("");
 const savedSubject = ref("");
+const tags = ref<string[]>([]);
+const savedTags = ref<string[]>([]);
 const isDirty = ref(false);
 const status = ref("Connecting to Haven...");
 const openDialogVisible = ref(false);
+const propertiesDialogVisible = ref(false);
 const refreshConfirmVisible = ref(false);
 const infoDialogVisible = ref(false);
 const deleteConfirmVisible = ref(false);
@@ -108,7 +123,14 @@ const showPreviewPane = ref(previewPaneSettings.showPreviewPane);
 const previewPanePosition = ref<PreviewPanePosition>(previewPaneSettings.previewPanePosition);
 const previewRoot = ref<HTMLElement | null>(null);
 const selectedOpenDocId = ref("");
+const selectedOpenCategoryKey = ref(ALL_DOCUMENTS_NODE_KEY);
+const openCategoryNodes = ref<OpenCategoryNode[]>([]);
+const openDialogDocuments = ref<OpenDocumentRow[]>([]);
+const allOpenDialogDocuments = ref<OpenDocumentRow[]>([]);
+const openNavigator = ref<MindooDBAppViewNavigator | null>(null);
 const copiedInfoLabel = ref<string | null>(null);
+const propertiesTitleDraft = ref("");
+const propertiesTagsDraft = ref("");
 let cleanupTheme: (() => void) | null = null;
 let cleanupUiPreferences: (() => void) | null = null;
 let previewRenderGeneration = 0;
@@ -125,16 +147,21 @@ const currentDatabaseInfo = computed(() => databases.value.find((database) => da
 const currentCanUpdate = computed(() => currentDatabaseInfo.value?.capabilities.includes("update") ?? false);
 const currentCanDelete = computed(() => currentDatabaseInfo.value?.capabilities.includes("delete") ?? false);
 const currentCanBrowseHistory = computed(() => currentDatabaseInfo.value?.capabilities.includes("history") ?? false);
+const isTimeTravelActive = computed(() => launchTimeTravelDate.value != null);
+const timeTravelDateLabel = computed(() =>
+  launchTimeTravelDate.value == null ? "" : new Date(launchTimeTravelDate.value).toLocaleString(),
+);
 const isViewingHistorical = computed(() => viewingHistoricalSnapshot.value !== null);
 const activeDocumentView = computed(() => viewingHistoricalSnapshot.value ?? currentDocument.value);
 const activeRevisionId = computed<MindooDBAppDocumentRevisionId | null>(() => viewingHistoricalSnapshot.value?.revisionId ?? null);
 const canUseAttachments = computed(() => currentDatabaseInfo.value?.capabilities.includes("attachments") ?? false);
-const canManageAttachments = computed(() => canUseAttachments.value && currentCanUpdate.value && !isViewingHistorical.value);
-const canCreate = computed(() => creatableDatabases.value.length > 0);
+const canManageAttachments = computed(() => canUseAttachments.value && currentCanUpdate.value && !isViewingHistorical.value && !isTimeTravelActive.value);
+const canCreate = computed(() => !isTimeTravelActive.value && creatableDatabases.value.length > 0);
 const subjectDirty = computed(() => subject.value !== savedSubject.value);
-const hasLocalEdits = computed(() => isDirty.value || subjectDirty.value);
-const canSave = computed(() => Boolean(!isViewingHistorical.value && hasLocalEdits.value && currentCanUpdate.value && currentDatabase.value && currentDocument.value));
-const canDelete = computed(() => Boolean(!isViewingHistorical.value && currentCanDelete.value && currentDatabase.value && currentDocument.value));
+const tagsDirty = computed(() => JSON.stringify(tags.value) !== JSON.stringify(savedTags.value));
+const hasLocalEdits = computed(() => isDirty.value || subjectDirty.value || tagsDirty.value);
+const canSave = computed(() => Boolean(!isViewingHistorical.value && !isTimeTravelActive.value && hasLocalEdits.value && currentCanUpdate.value && currentDatabase.value && currentDocument.value));
+const canDelete = computed(() => Boolean(!isViewingHistorical.value && !isTimeTravelActive.value && currentCanDelete.value && currentDatabase.value && currentDocument.value));
 const canRefresh = computed(() => Boolean(currentDatabase.value && currentDocument.value));
 const canShowInfo = computed(() => Boolean(currentDatabaseId.value && currentDocument.value));
 const canPrint = computed(() => Boolean(currentDocument.value));
@@ -153,12 +180,23 @@ const statusBadgeLabel = computed(() => {
   if (viewingHistoricalSnapshot.value) {
     return `Historical · ${formatRevisionDate(viewingHistoricalSnapshot.value.timestamp)}`;
   }
+  if (isTimeTravelActive.value) {
+    return `Time travel · ${timeTravelDateLabel.value}`;
+  }
   return `Current · ${hasLocalEdits.value ? "Unsaved" : "Saved"}`;
 });
-const statusBadgeTooltip = computed(() => isViewingHistorical.value
-  ? "You're viewing a historical revision. Click to pick a different version or return to the current one."
-  : "You're viewing the current version. Click to browse older revisions.");
+const editorReadOnly = computed(() => isViewingHistorical.value || isTimeTravelActive.value);
+const statusBadgeTooltip = computed(() => {
+  if (isViewingHistorical.value) {
+    return "You're viewing a historical revision. Click to pick a different version or return to the current one.";
+  }
+  if (isTimeTravelActive.value) {
+    return "Time travel mode is active. The whole database is opened read-only.";
+  }
+  return "You're viewing the current version. Click to browse older revisions.";
+});
 const splitterLayout = computed(() => previewPanePosition.value === "bottom" ? "vertical" : "horizontal");
+const documentTitle = computed(() => subject.value.trim() || "Untitled document");
 const currentDatabaseLabel = computed(() => {
   const info = databases.value.find((database) => database.id === currentDatabaseId.value);
   if (info?.title) {
@@ -329,6 +367,7 @@ onMounted(async () => {
     const nextSession = await bridge.connect();
     session.value = nextSession;
     const context = await nextSession.getLaunchContext();
+    launchTimeTravelDate.value = context.timeTravelDate ?? null;
     applyAppTheme(context.theme);
     cleanupTheme = nextSession.onThemeChange((theme) => applyAppTheme(theme));
     currentRuntime.value = context.runtime;
@@ -412,6 +451,16 @@ watch(
   },
 );
 
+watch(
+  () => currentDocument.value,
+  () => {
+    if (!propertiesDialogVisible.value) {
+      resetPropertiesDraft();
+    }
+  },
+  { immediate: true },
+);
+
 async function openDatabaseById(databaseId: string) {
   if (!session.value || !databaseId) {
     throw new Error("Select a database first.");
@@ -419,31 +468,104 @@ async function openDatabaseById(databaseId: string) {
   return await session.value.openDatabase(databaseId);
 }
 
-/** Refresh the document list shown in the File/Open dialog. */
-async function refreshDocuments() {
-  const database = await openDatabaseById(selectedDatabaseId.value);
-  const result = await database.documents.list({
-    status: "existing",
-    limit: 100,
-  });
-  documents.value = [...result.items].sort((left, right) => {
-    const subjectComparison = readDocumentSummaryLabel(left).localeCompare(readDocumentSummaryLabel(right), undefined, {
-      sensitivity: "base",
-      numeric: true,
-    });
-    return subjectComparison || left.id.localeCompare(right.id);
-  });
-}
-
 /** Load documents before showing the File/Open picker. */
 async function openFileDialog() {
   try {
-    await refreshDocuments();
-    selectedOpenDocId.value = documents.value[0]?.id ?? "";
+    await rebuildOpenNavigator();
+    selectedOpenCategoryKey.value = ALL_DOCUMENTS_NODE_KEY;
+    selectedOpenDocId.value = openDialogDocuments.value[0]?.id ?? "";
     openDialogVisible.value = true;
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
   }
+}
+
+async function handleOpenDatabaseChange() {
+  try {
+    const previousDocumentId = selectedOpenDocId.value;
+    await rebuildOpenNavigator();
+    selectedOpenDocId.value = openDialogDocuments.value.some((document) => document.id === previousDocumentId)
+      ? previousDocumentId
+      : openDialogDocuments.value[0]?.id ?? "";
+  } catch (error) {
+    status.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function selectOpenCategory(key: string) {
+  selectedOpenCategoryKey.value = key;
+  await refreshOpenDocumentsForSelectedCategory();
+}
+
+async function rebuildOpenNavigator() {
+  const databaseInfo = selectedDatabaseInfo.value;
+  if (!databaseInfo?.capabilities.includes("views")) {
+    throw new Error("This database does not expose the views capability required for categorized Open.");
+  }
+  await disposeOpenNavigator();
+  if (!session.value) {
+    throw new Error("Connect to Haven before opening a view.");
+  }
+  const navigator = await session.value.createViewNavigator({
+    databaseIds: [selectedDatabaseId.value],
+    definition: createOpenViewDefinition(),
+    categorizationStyle: "category_then_document",
+    options: {
+      includeCategories: true,
+      includeDocuments: true,
+      hideEmptyCategories: true,
+    },
+  });
+  await navigator.expandAll();
+  const entries = await collectNavigatorEntries(navigator);
+  const documents = dedupeDocumentEntries(entries);
+  const categories = buildOpenCategoryTree(entries.filter((entry) => entry.kind === "category"), documents.length);
+  openNavigator.value = navigator;
+  openCategoryNodes.value = categories.roots;
+  selectedOpenCategoryKey.value = ALL_DOCUMENTS_NODE_KEY;
+  allOpenDialogDocuments.value = documents;
+  openDialogDocuments.value = documents;
+  selectedOpenDocId.value = documents[0]?.id ?? "";
+}
+
+async function refreshOpenDocumentsForSelectedCategory() {
+  const navigator = openNavigator.value;
+  if (!navigator || selectedOpenCategoryKey.value === ALL_DOCUMENTS_NODE_KEY) {
+    openDialogDocuments.value = allOpenDialogDocuments.value;
+  } else {
+    openDialogDocuments.value = mapDocumentEntries(await navigator.childDocuments(selectedOpenCategoryKey.value));
+  }
+  if (!openDialogDocuments.value.some((document) => document.id === selectedOpenDocId.value)) {
+    selectedOpenDocId.value = openDialogDocuments.value[0]?.id ?? "";
+  }
+}
+
+async function disposeOpenNavigator() {
+  await openNavigator.value?.dispose();
+  openNavigator.value = null;
+}
+
+function openPropertiesDialog() {
+  if (!currentDocument.value || editorReadOnly.value) {
+    return;
+  }
+  resetPropertiesDraft();
+  propertiesDialogVisible.value = true;
+}
+
+function applyDocumentProperties() {
+  if (!currentDocument.value || editorReadOnly.value) {
+    return;
+  }
+  subject.value = propertiesTitleDraft.value.trim();
+  // Tags are newline-edited for now so users can paste category paths quickly.
+  tags.value = normalizeTags(propertiesTagsDraft.value.split(/\r?\n/));
+  propertiesDialogVisible.value = false;
+}
+
+function resetPropertiesDraft() {
+  propertiesTitleDraft.value = subject.value;
+  propertiesTagsDraft.value = tags.value.join("\n");
 }
 
 /** Create a new empty markdown document. */
@@ -460,6 +582,7 @@ async function newFile() {
     const document = await database.documents.create({
       set: {
         subject: "",
+        tags: [],
         body: "",
       },
     });
@@ -483,6 +606,7 @@ async function openSelectedDocument() {
     }
     loadDocumentIntoEditor(database, databaseId, document);
     openDialogVisible.value = false;
+    await disposeOpenNavigator();
     status.value = `Opened ${document.id}.`;
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
@@ -544,6 +668,8 @@ async function loadHistoricalRevision(revisionId: MindooDBAppDocumentRevisionId)
     textBuffer.value = null;
     savedSubject.value = readHistoricalSubject(snapshot);
     subject.value = savedSubject.value;
+    savedTags.value = readHistoricalTags(snapshot);
+    tags.value = [...savedTags.value];
     suppressEditorUpdate = true;
     markdown.value = readHistoricalBody(snapshot);
     isDirty.value = false;
@@ -573,6 +699,8 @@ function returnToCurrent() {
     : null;
   savedSubject.value = readSubject(currentDocument.value);
   subject.value = savedSubject.value;
+  savedTags.value = readTags(currentDocument.value);
+  tags.value = [...savedTags.value];
   suppressEditorUpdate = true;
   markdown.value = textBuffer.value?.value ?? readDocumentBody(currentDocument.value);
   isDirty.value = false;
@@ -743,15 +871,20 @@ async function saveFile() {
     status.value = "This application does not have write access to the current document database.";
     return;
   }
-  if (isViewingHistorical.value) {
-    status.value = "Historical revisions are read-only. Return to the current version before saving.";
+  if (editorReadOnly.value) {
+    status.value = isTimeTravelActive.value
+      ? "Time travel mode is read-only."
+      : "Historical revisions are read-only. Return to the current version before saving.";
     return;
   }
   try {
     let document = currentDocument.value;
-    if (subjectDirty.value) {
+    if (subjectDirty.value || tagsDirty.value) {
       document = await currentDatabase.value.documents.update(document.id, {
-        set: { subject: subject.value },
+        set: {
+          subject: subject.value,
+          tags: tags.value,
+        },
       });
       currentDocument.value = document;
     }
@@ -762,6 +895,8 @@ async function saveFile() {
     currentDocument.value = result.document;
     savedSubject.value = readSubject(result.document);
     subject.value = savedSubject.value;
+    savedTags.value = readTags(result.document);
+    tags.value = [...savedTags.value];
     if (result.reconciled) {
       suppressEditorUpdate = true;
       markdown.value = result.value;
@@ -787,8 +922,10 @@ async function deleteCurrentDocument() {
     status.value = "This application does not have delete access to the current document database.";
     return;
   }
-  if (isViewingHistorical.value) {
-    status.value = "Historical revisions are read-only. Return to the current version before deleting.";
+  if (editorReadOnly.value) {
+    status.value = isTimeTravelActive.value
+      ? "Time travel mode is read-only."
+      : "Historical revisions are read-only. Return to the current version before deleting.";
     return;
   }
   try {
@@ -801,6 +938,8 @@ async function deleteCurrentDocument() {
     markdown.value = "";
     subject.value = "";
     savedSubject.value = "";
+    tags.value = [];
+    savedTags.value = [];
     isDirty.value = false;
     status.value = `Deleted ${deletedDocumentId}.`;
   } catch (error) {
@@ -853,8 +992,10 @@ function requestAttachmentInsertFromEditor(): Promise<AttachmentInsertion | null
     status.value = "This application does not have attachment access for the current document database.";
     return Promise.resolve(null);
   }
-  if (isViewingHistorical.value) {
-    status.value = "Return to the current version before inserting attachment links.";
+  if (editorReadOnly.value) {
+    status.value = isTimeTravelActive.value
+      ? "Time travel mode is read-only."
+      : "Return to the current version before inserting attachment links.";
     return Promise.resolve(null);
   }
   // If a previous request is still pending (e.g. user reopened the slash menu
@@ -901,6 +1042,8 @@ function loadDocumentIntoEditor(database: MindooDBAppDatabase, databaseId: strin
   });
   subject.value = readSubject(document);
   savedSubject.value = subject.value;
+  tags.value = readTags(document);
+  savedTags.value = [...tags.value];
   suppressEditorUpdate = true;
   markdown.value = textBuffer.value.value;
   isDirty.value = false;
@@ -916,7 +1059,7 @@ function loadDocumentIntoEditor(database: MindooDBAppDatabase, databaseId: strin
  * buffer converts each new value to a minimal text splice with `replaceText()`.
  */
 function onEditorUpdate(value: string) {
-  if (isViewingHistorical.value) {
+  if (editorReadOnly.value) {
     return;
   }
   markdown.value = value;
@@ -929,6 +1072,10 @@ function onEditorUpdate(value: string) {
 function readSubject(document: MindooDBAppDocument) {
   const value = document.data.subject;
   return typeof value === "string" ? value : "";
+}
+
+function readTags(document: MindooDBAppDocument) {
+  return readDocumentTags(document.data);
 }
 
 function readDocumentBody(document: MindooDBAppDocument) {
@@ -946,6 +1093,10 @@ function readHistoricalBody(snapshot: MindooDBAppHistoricalDocument) {
   return typeof value === "string" ? value : "";
 }
 
+function readHistoricalTags(snapshot: MindooDBAppHistoricalDocument) {
+  return readDocumentTags(snapshot.data);
+}
+
 function formatRevisionDate(timestamp: number) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -953,10 +1104,6 @@ function formatRevisionDate(timestamp: number) {
   }).format(new Date(timestamp));
 }
 
-function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
-  const value = document.data?.subject;
-  return typeof value === "string" && value.trim() ? value : document.id;
-}
 </script>
 
 <template>
@@ -980,6 +1127,15 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
           @click="requestRefreshCurrentDocument"
         />
       </div>
+      <button
+        v-if="currentDocument"
+        class="toolbar__document-title"
+        type="button"
+        :disabled="editorReadOnly"
+        @click="openPropertiesDialog"
+      >
+        {{ documentTitle }}
+      </button>
       <div class="toolbar__meta">
         <button
           v-if="currentCanBrowseHistory && currentDocument"
@@ -995,124 +1151,146 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
     </header>
 
     <section class="workspace">
-      <section class="document-area">
-        <Splitter
-          v-if="showPreviewPane"
-          :layout="splitterLayout"
-          class="editor-preview-splitter"
-        >
-          <SplitterPanel :size="previewPanePosition === 'bottom' ? 60 : 62" :min-size="25" class="splitter-panel">
-            <section class="editor-panel glass-card" :class="{ 'editor-panel--history': isViewingHistorical }">
-              <template v-if="currentDocument">
+      <template v-if="currentDocument">
+        <section class="document-area">
+          <Splitter
+            v-if="showPreviewPane"
+            :layout="splitterLayout"
+            class="editor-preview-splitter"
+          >
+            <SplitterPanel :size="previewPanePosition === 'bottom' ? 60 : 62" :min-size="25" class="splitter-panel">
+              <section class="editor-panel glass-card" :class="{ 'editor-panel--history': editorReadOnly }">
+                <div v-if="isTimeTravelActive" class="history-banner">
+                  <i class="pi pi-clock" aria-hidden="true" />
+                  <span>Time travel mode is active as of {{ timeTravelDateLabel }} - read-only.</span>
+                </div>
                 <div v-if="isViewingHistorical" class="history-banner">
                   <i class="pi pi-history" aria-hidden="true" />
                   <span>You're viewing the version from {{ formatRevisionDate(viewingHistoricalSnapshot?.timestamp ?? 0) }} - read-only.</span>
                   <button type="button" @click="returnToCurrent">Return to current</button>
                 </div>
-                <label class="field subject-field">
-                  <span class="field-label">Title</span>
-                  <input
-                    v-model="subject"
-                    class="native-input subject-input"
-                    placeholder="Document title"
-                    type="text"
-                    :readonly="isViewingHistorical"
-                  >
-                </label>
                 <MilkdownMarkdownEditor
                   :model-value="markdown"
                   :on-image-upload="uploadEditorImage"
                   :resolve-image-url="imageResolver.resolveImageUrl"
                   :request-attachment-insert="requestAttachmentInsertFromEditor"
-                  :readonly="isViewingHistorical"
+                  :readonly="editorReadOnly"
                   @update:model-value="onEditorUpdate"
                 />
-              </template>
-              <div v-else class="empty-state">
-                Use File / New or File / Open to start editing a markdown document.
-              </div>
-            </section>
-          </SplitterPanel>
+              </section>
+            </SplitterPanel>
 
-          <SplitterPanel :size="previewPanePosition === 'bottom' ? 40 : 38" :min-size="20" class="splitter-panel">
-            <section class="preview-panel glass-card">
-              <p class="eyebrow">Preview</p>
-              <article ref="previewRoot" class="markdown-preview" v-html="renderedMarkdown" />
-            </section>
-          </SplitterPanel>
-        </Splitter>
+            <SplitterPanel :size="previewPanePosition === 'bottom' ? 40 : 38" :min-size="20" class="splitter-panel">
+              <section class="preview-panel glass-card">
+                <p class="eyebrow">Preview</p>
+                <article ref="previewRoot" class="markdown-preview" v-html="renderedMarkdown" />
+              </section>
+            </SplitterPanel>
+          </Splitter>
 
-        <section v-else class="editor-panel glass-card" :class="{ 'editor-panel--history': isViewingHistorical }">
-          <template v-if="currentDocument">
+          <section v-else class="editor-panel glass-card" :class="{ 'editor-panel--history': editorReadOnly }">
+            <div v-if="isTimeTravelActive" class="history-banner">
+              <i class="pi pi-clock" aria-hidden="true" />
+              <span>Time travel mode is active as of {{ timeTravelDateLabel }} - read-only.</span>
+            </div>
             <div v-if="isViewingHistorical" class="history-banner">
               <i class="pi pi-history" aria-hidden="true" />
               <span>You're viewing the version from {{ formatRevisionDate(viewingHistoricalSnapshot?.timestamp ?? 0) }} - read-only.</span>
               <button type="button" @click="returnToCurrent">Return to current</button>
             </div>
-            <label class="field subject-field">
-              <span class="field-label">Title</span>
-              <input
-                v-model="subject"
-                class="native-input subject-input"
-                placeholder="Document title"
-                type="text"
-                :readonly="isViewingHistorical"
-              >
-            </label>
             <MilkdownMarkdownEditor
               :model-value="markdown"
               :on-image-upload="uploadEditorImage"
               :resolve-image-url="imageResolver.resolveImageUrl"
               :request-attachment-insert="requestAttachmentInsertFromEditor"
-              :readonly="isViewingHistorical"
+              :readonly="editorReadOnly"
               @update:model-value="onEditorUpdate"
             />
-          </template>
-          <div v-else class="empty-state">
-            Use File / New or File / Open to start editing a markdown document.
-          </div>
+          </section>
         </section>
-      </section>
 
-      <DocumentAttachmentsPanel
-        v-if="currentDocument"
-        :attachments="activeAttachments"
-        :busy-action="attachmentBusyAction"
-        :can-manage-attachments="canManageAttachments"
-        :can-use-attachments="canUseAttachments"
-        :historical="isViewingHistorical"
-        :upload-input-key="attachmentUploadInputKey"
-        :can-preview-attachment="canPreviewAttachment"
-        :format-attachment-size="formatAttachmentSize"
-        @upload="uploadAttachments"
-        @preview="previewAttachment"
-        @download="downloadAttachment"
-        @remove="removeDocumentAttachment"
-      />
+        <DocumentAttachmentsPanel
+          :attachments="activeAttachments"
+          :busy-action="attachmentBusyAction"
+          :can-manage-attachments="canManageAttachments"
+          :can-use-attachments="canUseAttachments"
+          :historical="editorReadOnly"
+          :upload-input-key="attachmentUploadInputKey"
+          :can-preview-attachment="canPreviewAttachment"
+          :format-attachment-size="formatAttachmentSize"
+          @upload="uploadAttachments"
+          @preview="previewAttachment"
+          @download="downloadAttachment"
+          @remove="removeDocumentAttachment"
+        />
+      </template>
+      <section v-else class="empty-state">
+        <h1>Collaborative markdown documents</h1>
+        <p>Create a new markdown document or open an existing one. Write with rich formatting, attach images and files, and edit alongside your teammates with real-time updates.</p>
+        <div class="empty-state__actions">
+          <Button label="New document" icon="pi pi-file-plus" :disabled="!canCreate" @click="newFile" />
+          <Button label="Open document" icon="pi pi-folder-open" severity="secondary" :disabled="readableDatabases.length === 0" @click="openFileDialog" />
+        </div>
+      </section>
     </section>
 
-    <Dialog v-model:visible="openDialogVisible" modal header="Open Markdown Document" :style="{ width: '32rem' }">
+    <Dialog v-model:visible="openDialogVisible" modal header="Open Markdown Document" :style="{ width: '58rem', maxWidth: '96vw' }" @hide="disposeOpenNavigator">
       <div class="dialog-content">
         <label class="field">
           <span class="field-label">Database</span>
-          <select v-model="selectedDatabaseId" class="native-input" @change="refreshDocuments">
+          <select v-model="selectedDatabaseId" class="native-input" @change="handleOpenDatabaseChange">
             <option v-for="database in readableDatabases" :key="database.id" :value="database.id">
               {{ database.title || database.id }}
             </option>
           </select>
         </label>
-        <label class="field">
-          <span class="field-label">Document</span>
-          <select v-model="selectedOpenDocId" class="native-input">
-            <option v-for="document in documents" :key="document.id" :value="document.id">
-              {{ readDocumentSummaryLabel(document) }}
-            </option>
-          </select>
-        </label>
+        <div class="open-dialog__browser">
+          <aside class="open-dialog__tree" aria-label="Document tags">
+            <TagTreeList
+              :nodes="openCategoryNodes"
+              :selected-key="selectedOpenCategoryKey"
+              @select="selectOpenCategory"
+            />
+          </aside>
+          <div class="document-list">
+            <button
+              v-for="document in openDialogDocuments"
+              :key="document.id"
+              class="document-row"
+              :class="{ 'document-row--selected': document.id === selectedOpenDocId }"
+              type="button"
+              @click="selectedOpenDocId = document.id"
+              @dblclick="openSelectedDocument"
+            >
+              <strong>{{ document.title }}</strong>
+              <small>{{ document.detail }}</small>
+              <small>{{ document.id }}</small>
+            </button>
+            <p v-if="openDialogDocuments.length === 0" class="document-list__empty">No documents in this category.</p>
+          </div>
+        </div>
       </div>
       <template #footer>
         <Button label="Cancel" severity="secondary" @click="openDialogVisible = false" />
         <Button label="Open" :disabled="!selectedOpenDocId" @click="openSelectedDocument" />
+      </template>
+    </Dialog>
+
+    <Dialog v-model:visible="propertiesDialogVisible" modal header="Document properties" :style="{ width: '34rem', maxWidth: '96vw' }">
+      <div class="dialog-content">
+        <label class="field">
+          <span class="field-label">Title</span>
+          <input v-model="propertiesTitleDraft" class="native-input" type="text" autocomplete="off" placeholder="Document title">
+        </label>
+        <label class="field">
+          <span class="field-label">Tags</span>
+          <textarea v-model="propertiesTagsDraft" class="native-input native-input--textarea" rows="6" placeholder="Work\Planning&#10;Customer\ABC" />
+        </label>
+        <p class="field-hint">Enter one tag per line. Use a backslash to create hierarchy, for example <code>Work\Planning</code>.</p>
+      </div>
+      <template #footer>
+        <Button label="Cancel" text @click="propertiesDialogVisible = false; resetPropertiesDraft()" />
+        <Button label="Apply" icon="pi pi-check" :disabled="editorReadOnly" @click="applyDocumentProperties" />
       </template>
     </Dialog>
 
@@ -1288,6 +1466,34 @@ function readDocumentSummaryLabel(document: MindooDBAppDocumentSummary) {
   font-size: 0.78rem;
 }
 
+.toolbar__document-title {
+  position: absolute;
+  left: 50%;
+  max-width: min(32rem, 36vw);
+  transform: translateX(-50%);
+  padding: 0.22rem 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.toolbar__document-title:hover:not(:disabled),
+.toolbar__document-title:focus-visible {
+  border-color: var(--border-strong);
+  background: rgb(212 160 23 / 0.12);
+}
+
+.toolbar__document-title:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
 .toolbar__title {
   flex: 0 0 auto;
   margin: 0;
@@ -1355,6 +1561,12 @@ button.toolbar__status-badge:focus-visible {
     box-shadow: var(--shadow);
     backdrop-filter: var(--surface-blur);
   }
+
+  .toolbar__document-title {
+    position: static;
+    max-width: 14rem;
+    transform: none;
+  }
 }
 
 .workspace {
@@ -1414,20 +1626,21 @@ button.toolbar__status-badge:focus-visible {
   color: inherit;
 }
 
-.empty-state {
-  color: var(--muted);
+.native-input--textarea {
+  min-height: 8rem;
+  resize: vertical;
 }
 
 .editor-panel {
   height: 100%;
   overflow: auto;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: 1rem;
 }
 
 .editor-panel--history {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 
 .history-banner {
@@ -1455,19 +1668,6 @@ button.toolbar__status-badge:focus-visible {
 .preview-panel {
   height: 100%;
   overflow: auto;
-}
-
-.subject-field {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  padding-bottom: 0.75rem;
-  background: var(--surface);
-}
-
-.subject-input {
-  font-size: 1.1rem;
-  font-weight: 700;
 }
 
 .markdown-preview {
@@ -1615,15 +1815,88 @@ button.toolbar__status-badge:focus-visible {
 }
 
 .empty-state {
-  min-height: 20rem;
+  margin: auto;
+  max-width: 36rem;
   display: grid;
-  place-items: center;
+  gap: 0.85rem;
+  padding: 1.25rem 1.5rem;
   text-align: center;
+}
+
+.empty-state h1 {
+  margin: 0;
+  font-family: var(--font-title);
+  font-size: clamp(1.5rem, 3.5vw, 2.4rem);
+  line-height: 1.15;
+}
+
+.empty-state p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.empty-state__actions {
+  display: flex;
+  justify-content: center;
+  gap: 0.55rem;
+  flex-wrap: wrap;
 }
 
 .dialog-content {
   display: grid;
   gap: 1rem;
+}
+
+.open-dialog__browser {
+  min-height: 22rem;
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.8fr) minmax(0, 1.4fr);
+  gap: 0.8rem;
+}
+
+.open-dialog__tree {
+  max-height: 24rem;
+  overflow: auto;
+  padding: 0.35rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: rgb(255 255 255 / 0.025);
+}
+
+.document-list {
+  max-height: 24rem;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 0.45rem;
+}
+
+.document-row {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 0.85rem;
+  background: rgb(255 255 255 / 0.03);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.document-row--selected,
+.document-row:hover {
+  border-color: var(--accent);
+  background: rgb(255 255 255 / 0.07);
+}
+
+.document-row small,
+.document-list__empty {
+  color: var(--muted);
+}
+
+.document-list__empty {
+  margin: 0;
 }
 
 .info-stack {
@@ -1659,8 +1932,18 @@ button.toolbar__status-badge:focus-visible {
   font-size: 0.85rem;
 }
 
+.field-hint code {
+  color: var(--accent);
+}
+
 @media (max-width: 1100px) {
   .workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .open-dialog__browser {
     grid-template-columns: 1fr;
   }
 }
