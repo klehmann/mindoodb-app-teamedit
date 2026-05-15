@@ -12,6 +12,7 @@ import {
 
 const MARKDOWN_MIME_TYPE = "text/markdown;charset=utf-8";
 const ZIP_MIME_TYPE = "application/zip";
+export const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 type BrowserFileHandle = {
   createWritable(): Promise<{
@@ -39,7 +40,7 @@ export interface ExportMarkdownPackageOptions {
   revisionId?: MindooDBAppDocumentRevisionId;
 }
 
-export function createExportFileName(title: string, extension: "md" | "zip") {
+export function createExportFileName(title: string, extension: "docx" | "md" | "zip") {
   const baseName = title
     .normalize("NFKC")
     .replace(/[\\/]/g, "-")
@@ -72,7 +73,11 @@ export async function saveBlobToDisk(blob: Blob, fileName: string) {
       const handle = await savePicker({
         suggestedName: fileName,
         types: [{
-          description: fileName.endsWith(".zip") ? "ZIP archive" : "Markdown file",
+          description: fileName.endsWith(".zip")
+            ? "ZIP archive"
+            : fileName.endsWith(".docx")
+              ? "Word document"
+              : "Markdown file",
           accept: {
             [blob.type || "application/octet-stream"]: [fileName.slice(fileName.lastIndexOf("."))],
           },

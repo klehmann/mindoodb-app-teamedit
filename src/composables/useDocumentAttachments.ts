@@ -5,7 +5,6 @@ import {
   type MindooDBAppDocument,
   type MindooDBAppDocumentRevisionId,
   type MindooDBAppHistoricalDocument,
-  type MindooDBAppRuntime,
 } from "mindoodb-app-sdk";
 
 import {
@@ -17,9 +16,10 @@ import {
 
 export interface UseDocumentAttachmentsOptions {
   database: Ref<MindooDBAppDatabase | null>;
-  document: Readonly<Ref<MindooDBAppDocument | MindooDBAppHistoricalDocument | null>>;
+  document: Readonly<
+    Ref<MindooDBAppDocument | MindooDBAppHistoricalDocument | null>
+  >;
   revisionId?: Ref<MindooDBAppDocumentRevisionId | null>;
-  runtime: Ref<MindooDBAppRuntime>;
   setStatus(message: string): void;
   onDocumentRefresh?(document: MindooDBAppDocument): void;
 }
@@ -57,13 +57,52 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
     busyAction.value = "Uploading attachment";
     try {
       for (const file of selectedFiles) {
-        await uploadFileAttachment(database, document.id, sanitizeAttachmentFileName(file.name), file);
+        await uploadFileAttachment(
+          database,
+          document.id,
+          sanitizeAttachmentFileName(file.name),
+          file,
+        );
       }
       await refreshCurrentDocument();
       uploadInputKey.value += 1;
-      options.setStatus(`Uploaded ${selectedFiles.length} attachment${selectedFiles.length === 1 ? "" : "s"}.`);
+      options.setStatus(
+        `Uploaded ${selectedFiles.length} attachment${selectedFiles.length === 1 ? "" : "s"}.`,
+      );
     } catch (error) {
-      options.setStatus(error instanceof Error ? error.message : "The attachment upload failed.");
+      options.setStatus(
+        error instanceof Error
+          ? error.message
+          : "The attachment upload failed.",
+      );
+    } finally {
+      busyAction.value = null;
+    }
+  }
+
+  async function scanAttachment() {
+    const database = options.database.value;
+    const document = options.document.value;
+    if (!database || !document) {
+      return;
+    }
+
+    busyAction.value = "Scanning attachment";
+    try {
+      const result = await database.attachments.scan(document.id, {
+        defaultFileName: `scan-${document.id}.pdf`,
+        preset: "a4-portrait",
+        mimeType: "application/pdf",
+      });
+      if (result.ok) {
+        await refreshCurrentDocument();
+        uploadInputKey.value += 1;
+        options.setStatus("Scanned document attached.");
+      }
+    } catch (error) {
+      options.setStatus(
+        error instanceof Error ? error.message : "The document scan failed.",
+      );
     } finally {
       busyAction.value = null;
     }
@@ -79,29 +118,17 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
     busyAction.value = "Opening attachment preview";
     try {
       const revisionId = options.revisionId?.value ?? undefined;
-      if (options.runtime.value === "window" && typeof window !== "undefined") {
-        const previewTab = window.open("", "_blank");
-        if (!previewTab) {
-          throw new Error("The preview tab could not be opened. Allow popups and try again.");
-        }
-        previewTab.document.title = "Opening attachment preview...";
-        try {
-          const previewSession = await database.attachments.preparePreviewSession(
-            document.id,
-            attachmentName,
-            revisionId ? { revisionId } : undefined,
-          );
-          previewTab.location.href = previewSession.previewUrl;
-        } catch (error) {
-          previewTab.close();
-          throw error;
-        }
-        return;
-      }
-
-      await database.attachments.openPreview(document.id, attachmentName, revisionId ? { revisionId } : undefined);
+      await database.attachments.openPreview(
+        document.id,
+        attachmentName,
+        revisionId ? { revisionId } : undefined,
+      );
     } catch (error) {
-      options.setStatus(error instanceof Error ? error.message : "The attachment preview could not be opened.");
+      options.setStatus(
+        error instanceof Error
+          ? error.message
+          : "The attachment preview could not be opened.",
+      );
     } finally {
       busyAction.value = null;
     }
@@ -116,8 +143,11 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
 
     busyAction.value = "Downloading attachment";
     try {
-      const attachment = document.attachments?.find((entry) =>
-        entry.fileName === attachmentName || entry.attachmentId === attachmentName);
+      const attachment = document.attachments?.find(
+        (entry) =>
+          entry.fileName === attachmentName ||
+          entry.attachmentId === attachmentName,
+      );
       const revisionId = options.revisionId?.value ?? undefined;
       const blob = await readAttachmentBlob(
         database,
@@ -133,7 +163,11 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
       link.click();
       URL.revokeObjectURL(url);
     } catch (error) {
-      options.setStatus(error instanceof Error ? error.message : "The attachment could not be downloaded.");
+      options.setStatus(
+        error instanceof Error
+          ? error.message
+          : "The attachment could not be downloaded.",
+      );
     } finally {
       busyAction.value = null;
     }
@@ -153,7 +187,11 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
       uploadInputKey.value += 1;
       options.setStatus(`Removed attachment ${attachmentName}.`);
     } catch (error) {
-      options.setStatus(error instanceof Error ? error.message : "The attachment could not be removed.");
+      options.setStatus(
+        error instanceof Error
+          ? error.message
+          : "The attachment could not be removed.",
+      );
     } finally {
       busyAction.value = null;
     }
@@ -167,6 +205,7 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
     previewAttachment,
     refreshCurrentDocument,
     removeAttachment,
+    scanAttachment,
     uploadAttachments,
     uploadInputKey,
   };

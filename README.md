@@ -250,17 +250,17 @@ If you are using TeamEdit as a learning resource, a useful order to read the sou
 ### First-time setup
 
 ```bash
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
-`npm run dev` starts a Vite dev server on **http://127.0.0.1:4206** using the published `mindoodb-app-sdk` from npm. Hot reload is enabled, so saving a `.vue` or `.ts` file refreshes the running editor inside Haven.
+`pnpm dev` starts a Vite dev server on **http://127.0.0.1:4206** using the published `mindoodb-app-sdk` from npm. Hot reload is enabled, so saving a `.vue` or `.ts` file refreshes the running editor inside Haven.
 
-`npm run dev:local` keeps an optional local-monorepo workflow available by aliasing `mindoodb-app-sdk` to a sibling checkout. Use this when you are working on the SDK itself; otherwise stick to `npm run dev`.
+`pnpm dev:local` keeps an optional local-monorepo workflow available by aliasing `mindoodb-app-sdk` to a sibling checkout. Use this when you are working on the SDK itself; otherwise stick to `pnpm dev`.
 
 ### Connect TeamEdit to your local Haven instance
 
-TeamEdit cannot run on its own — it needs Haven to host it. Once `npm run dev` is running:
+TeamEdit cannot run on its own — it needs Haven to host it. Once `pnpm dev` is running:
 
 1. In Haven, open **Application settings** and register a new application pointing to `http://127.0.0.1:4206` (or the deployed URL of your TeamEdit instance).
 2. Map one or more databases to the app and grant capabilities. For the full TeamEdit experience you want `read`, `create`, `update`, `delete`, `attachments`, and `history`. Removing any of those capabilities is a useful way to see how the UI gracefully degrades.
@@ -272,20 +272,20 @@ The Haven launcher embeds TeamEdit in a sandboxed iframe and feeds it a launch c
 
 - The `dev` server uses Vite's HMR; most edits don't require a full reload. The Crepe editor instance is rebuilt on prop changes, so changes to `MilkdownMarkdownEditor.vue` always take effect immediately.
 - If something looks wrong after a hot reload, just refresh TeamEdit inside Haven — the SDK bridge re-establishes a fresh session.
-- The `dist/` folder is what gets uploaded by `npm run deploy`. Don't edit it; it's regenerated on each build.
+- The `dist/` folder is what gets uploaded by `pnpm deploy`. Don't edit it; it's regenerated on each build.
 
 ## Commands
 
 | Command | Description |
 |---|---|
-| `npm run dev` | Start Vite dev server using published packages |
-| `npm run dev:local` | Start Vite dev server using sibling MindooDB packages |
-| `npm run build` | Type-check and build a production bundle into `dist/` |
-| `npm run build:local` | Build with local Vite aliasing for sibling MindooDB packages |
-| `npm test` | Run the Vitest suite |
-| `npm run test:watch` | Run tests in watch mode |
-| `npm run preview` | Build and preview the Cloudflare deployment locally with Wrangler |
-| `npm run deploy` | Build and deploy the app to Cloudflare |
+| `pnpm dev` | Start Vite dev server using published packages |
+| `pnpm dev:local` | Start Vite dev server using sibling MindooDB packages |
+| `pnpm build` | Type-check and build a production bundle into `dist/` |
+| `pnpm build:local` | Build with local Vite aliasing for sibling MindooDB packages |
+| `pnpm test` | Run the Vitest suite |
+| `pnpm test:watch` | Run tests in watch mode |
+| `pnpm preview` | Build and preview the Cloudflare deployment locally with Wrangler |
+| `pnpm deploy` | Build and deploy the app to Cloudflare |
 
 ## Deployment to Cloudflare
 
@@ -307,7 +307,7 @@ The deployment config lives in `wrangler.jsonc`:
 Deploy with:
 
 ```bash
-npm run deploy
+pnpm deploy
 ```
 
 This runs `vue-tsc --noEmit && vite build` and then `wrangler deploy`, uploading the `dist/` folder as static assets with SPA fallback enabled. Any other static host works too, but the Cloudflare Workers + Wrangler path matches the rest of the MindooDB sample apps.
@@ -326,7 +326,7 @@ The Vitest suite covers the non-trivial pure helpers used by the attachment, ren
 Run them with:
 
 ```bash
-npm test
+pnpm test
 ```
 
 The collaborative text editing flow is covered end-to-end by the SDK and Haven test suites; TeamEdit relies on those by composing the `MindooDBTextBuffer` API documented above.

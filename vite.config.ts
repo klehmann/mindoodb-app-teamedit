@@ -21,6 +21,9 @@ function createResolveAliases() {
 
 export default defineConfig({
   plugins: [wasm(), vue()],
+  optimizeDeps: {
+    include: ["vue", "primevue/config", "primevue/tooltip"],
+  },
   resolve: {
     alias: createResolveAliases(),
   },

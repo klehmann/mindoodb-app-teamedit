@@ -17,6 +17,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   upload: [files: FileList | readonly File[] | null];
+  scan: [];
   preview: [attachmentName: string];
   download: [attachmentName: string];
   remove: [attachmentName: string];
@@ -100,7 +101,9 @@ function updateRemovalDialogVisible(visible: boolean) {
 <template>
   <section
     class="attachments-panel glass-card"
-    :class="{ 'attachments-panel--drag-active': dragActive && canManageAttachments }"
+    :class="{
+      'attachments-panel--drag-active': dragActive && canManageAttachments,
+    }"
     @dragenter="handleDragEnter"
     @dragover="handleDragOver"
     @dragleave="handleDragLeave"
@@ -116,29 +119,43 @@ function updateRemovalDialogVisible(visible: boolean) {
           <template v-else-if="canManageAttachments && !busyAction">
             Drop files here or use Upload.
           </template>
-          <template v-else-if="busyAction">
-            {{ busyAction }}...
-          </template>
+          <template v-else-if="busyAction"> {{ busyAction }}... </template>
           <template v-else-if="historical">
-            Read-only - viewing a historical revision. You can still preview or download files.
+            Read-only - viewing a historical revision. You can still preview or
+            download files.
           </template>
           <template v-else>
-            This app can preview and download attachments, but cannot upload or remove them.
+            This app can preview and download attachments, but cannot upload or
+            remove them.
           </template>
         </p>
       </div>
 
-      <label class="upload-button" :class="{ 'upload-button--disabled': !canManageAttachments || Boolean(busyAction) }">
-        <input
-          :key="uploadInputKey"
-          class="sr-only"
-          type="file"
-          multiple
-          :disabled="!canManageAttachments || Boolean(busyAction)"
-          @change="handleUpload"
+      <div class="attachments-panel__controls">
+        <label
+          class="upload-button"
+          :class="{
+            'upload-button--disabled':
+              !canManageAttachments || Boolean(busyAction),
+          }"
         >
-        <span>Upload</span>
-      </label>
+          <input
+            :key="uploadInputKey"
+            class="sr-only"
+            type="file"
+            multiple
+            :disabled="!canManageAttachments || Boolean(busyAction)"
+            @change="handleUpload"
+          />
+          <span>Upload</span>
+        </label>
+        <Button
+          label="Scan document"
+          severity="secondary"
+          :disabled="!canManageAttachments || Boolean(busyAction)"
+          @click="emit('scan')"
+        />
+      </div>
     </div>
 
     <div v-if="attachments.length" class="attachment-list">
@@ -149,7 +166,10 @@ function updateRemovalDialogVisible(visible: boolean) {
       >
         <div class="attachment-item__details">
           <strong>{{ attachment.fileName }}</strong>
-          <p>{{ attachment.mimeType }} · {{ formatAttachmentSize(attachment.size) }}</p>
+          <p>
+            {{ attachment.mimeType }} ·
+            {{ formatAttachmentSize(attachment.size) }}
+          </p>
         </div>
         <div class="attachment-item__actions">
           <Button
@@ -159,7 +179,11 @@ function updateRemovalDialogVisible(visible: boolean) {
             severity="secondary"
             :aria-label="`Preview ${attachment.fileName}`"
             :title="`Preview ${attachment.fileName}`"
-            :disabled="!canUseAttachments || !canPreviewAttachment(attachment.fileName, attachment.mimeType) || Boolean(busyAction)"
+            :disabled="
+              !canUseAttachments ||
+              !canPreviewAttachment(attachment.fileName, attachment.mimeType) ||
+              Boolean(busyAction)
+            "
             @click="emit('preview', attachment.fileName)"
           />
           <Button
@@ -185,7 +209,9 @@ function updateRemovalDialogVisible(visible: boolean) {
         </div>
       </article>
     </div>
-    <p v-else class="attachments-panel__empty">No attachments are stored for this document.</p>
+    <p v-else class="attachments-panel__empty">
+      No attachments are stored for this document.
+    </p>
 
     <Dialog
       :visible="Boolean(pendingRemoval)"
@@ -195,7 +221,8 @@ function updateRemovalDialogVisible(visible: boolean) {
       @update:visible="updateRemovalDialogVisible"
     >
       <p>
-        Remove attachment <code>{{ pendingRemoval?.fileName }}</code> from this document?
+        Remove attachment <code>{{ pendingRemoval?.fileName }}</code> from this
+        document?
       </p>
       <template #footer>
         <Button label="Cancel" text @click="pendingRemoval = null" />
@@ -221,12 +248,18 @@ function updateRemovalDialogVisible(visible: boolean) {
   gap: 0.6rem;
   border: 2px dashed transparent;
   border-radius: 0;
-  transition: border-color 120ms ease, background-color 120ms ease;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
 }
 
 .attachments-panel--drag-active {
   border-color: var(--p-primary-color, #5298f7);
-  background-color: color-mix(in srgb, var(--p-primary-color, #5298f7) 10%, transparent);
+  background-color: color-mix(
+    in srgb,
+    var(--p-primary-color, #5298f7) 10%,
+    transparent
+  );
 }
 
 .attachments-panel--drag-active * {
@@ -238,6 +271,17 @@ function updateRemovalDialogVisible(visible: boolean) {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.attachments-panel__header {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.attachments-panel__controls {
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.75rem;
 }
 

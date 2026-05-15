@@ -1,5 +1,12 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from "vue";
 import "highlight.js/styles/github.css";
 import Button from "primevue/button";
 import Dialog from "primevue/dialog";
@@ -36,10 +43,20 @@ import {
   createUniqueImageAttachmentName,
   uploadFileAttachment,
 } from "@/lib/attachmentImages";
-import { normalizeTags, readTags as readDocumentTags } from "@/lib/documentTags";
-import { exportMarkdownFile, exportMarkdownPackage } from "@/lib/exportMarkdown";
+import {
+  normalizeTags,
+  readTags as readDocumentTags,
+} from "@/lib/documentTags";
+import { exportDocxFile } from "@/lib/exportDocx";
+import {
+  exportMarkdownFile,
+  exportMarkdownPackage,
+} from "@/lib/exportMarkdown";
 import { applyImageRatios } from "@/lib/imageRatio";
-import { createMarkdownRenderer, normalizeMarkdownForRendering } from "@/lib/markdownRendering";
+import {
+  createMarkdownRenderer,
+  normalizeMarkdownForRendering,
+} from "@/lib/markdownRendering";
 import { renderMermaidPlaceholders } from "@/lib/mermaid";
 import { renderAndPrintMarkdownWindow } from "@/lib/printMarkdown";
 import { applyAppTheme } from "@/lib/theme";
@@ -60,19 +77,33 @@ type PreviewPanePosition = "right" | "bottom";
 
 function readPreviewPaneSettings() {
   if (typeof localStorage === "undefined") {
-    return { showPreviewPane: true, previewPanePosition: "right" as PreviewPanePosition };
+    return {
+      showPreviewPane: true,
+      previewPanePosition: "right" as PreviewPanePosition,
+    };
   }
   try {
-    const parsed = JSON.parse(localStorage.getItem(PREVIEW_PANE_SETTINGS_KEY) ?? "{}") as {
+    const parsed = JSON.parse(
+      localStorage.getItem(PREVIEW_PANE_SETTINGS_KEY) ?? "{}",
+    ) as {
       showPreviewPane?: unknown;
       previewPanePosition?: unknown;
     };
     return {
-      showPreviewPane: typeof parsed.showPreviewPane === "boolean" ? parsed.showPreviewPane : true,
-      previewPanePosition: parsed.previewPanePosition === "bottom" ? "bottom" as const : "right" as const,
+      showPreviewPane:
+        typeof parsed.showPreviewPane === "boolean"
+          ? parsed.showPreviewPane
+          : true,
+      previewPanePosition:
+        parsed.previewPanePosition === "bottom"
+          ? ("bottom" as const)
+          : ("right" as const),
     };
   } catch {
-    return { showPreviewPane: true, previewPanePosition: "right" as PreviewPanePosition };
+    return {
+      showPreviewPane: true,
+      previewPanePosition: "right" as PreviewPanePosition,
+    };
   }
 }
 
@@ -87,7 +118,9 @@ const selectedDatabaseId = ref("");
 const currentDatabase = ref<MindooDBAppDatabase | null>(null);
 const currentDatabaseId = ref("");
 const currentDocument = ref<MindooDBAppDocument | null>(null);
-const viewingHistoricalSnapshot = ref<MindooDBAppHistoricalDocument | null>(null);
+const viewingHistoricalSnapshot = ref<MindooDBAppHistoricalDocument | null>(
+  null,
+);
 const currentRuntime = ref<MindooDBAppRuntime>("iframe");
 const hostUiPreferences = ref<MindooDBAppUiPreferences>({
   iosMultitaskingOptimized: false,
@@ -118,9 +151,13 @@ const revisionErrorMessage = ref<string | null>(null);
 // either the picker's `select` or `cancel` paths, never both, and is cleared
 // once it fires so a closed-and-reopened dialog can never resolve a stale
 // editor request.
-let attachmentPickerResolver: ((value: AttachmentInsertion | null) => void) | null = null;
+let attachmentPickerResolver:
+  | ((value: AttachmentInsertion | null) => void)
+  | null = null;
 const showPreviewPane = ref(previewPaneSettings.showPreviewPane);
-const previewPanePosition = ref<PreviewPanePosition>(previewPaneSettings.previewPanePosition);
+const previewPanePosition = ref<PreviewPanePosition>(
+  previewPaneSettings.previewPanePosition,
+);
 const previewRoot = ref<HTMLElement | null>(null);
 const selectedOpenDocId = ref("");
 const selectedOpenCategoryKey = ref(ALL_DOCUMENTS_NODE_KEY);
@@ -140,41 +177,115 @@ let previewRenderGeneration = 0;
 // dirty immediately.
 let suppressEditorUpdate = false;
 
-const readableDatabases = computed(() => databases.value.filter((database) => database.capabilities.includes("read")));
-const creatableDatabases = computed(() => databases.value.filter((database) => database.capabilities.includes("create")));
-const selectedDatabaseInfo = computed(() => databases.value.find((database) => database.id === selectedDatabaseId.value) ?? null);
-const currentDatabaseInfo = computed(() => databases.value.find((database) => database.id === currentDatabaseId.value) ?? null);
-const currentCanUpdate = computed(() => currentDatabaseInfo.value?.capabilities.includes("update") ?? false);
-const currentCanDelete = computed(() => currentDatabaseInfo.value?.capabilities.includes("delete") ?? false);
-const currentCanBrowseHistory = computed(() => currentDatabaseInfo.value?.capabilities.includes("history") ?? false);
+const readableDatabases = computed(() =>
+  databases.value.filter((database) => database.capabilities.includes("read")),
+);
+const creatableDatabases = computed(() =>
+  databases.value.filter((database) =>
+    database.capabilities.includes("create"),
+  ),
+);
+const selectedDatabaseInfo = computed(
+  () =>
+    databases.value.find(
+      (database) => database.id === selectedDatabaseId.value,
+    ) ?? null,
+);
+const currentDatabaseInfo = computed(
+  () =>
+    databases.value.find(
+      (database) => database.id === currentDatabaseId.value,
+    ) ?? null,
+);
+const currentCanUpdate = computed(
+  () => currentDatabaseInfo.value?.capabilities.includes("update") ?? false,
+);
+const currentCanDelete = computed(
+  () => currentDatabaseInfo.value?.capabilities.includes("delete") ?? false,
+);
+const currentCanBrowseHistory = computed(
+  () => currentDatabaseInfo.value?.capabilities.includes("history") ?? false,
+);
 const isTimeTravelActive = computed(() => launchTimeTravelDate.value != null);
 const timeTravelDateLabel = computed(() =>
-  launchTimeTravelDate.value == null ? "" : new Date(launchTimeTravelDate.value).toLocaleString(),
+  launchTimeTravelDate.value == null
+    ? ""
+    : new Date(launchTimeTravelDate.value).toLocaleString(),
 );
-const isViewingHistorical = computed(() => viewingHistoricalSnapshot.value !== null);
-const activeDocumentView = computed(() => viewingHistoricalSnapshot.value ?? currentDocument.value);
-const activeRevisionId = computed<MindooDBAppDocumentRevisionId | null>(() => viewingHistoricalSnapshot.value?.revisionId ?? null);
-const canUseAttachments = computed(() => currentDatabaseInfo.value?.capabilities.includes("attachments") ?? false);
-const canManageAttachments = computed(() => canUseAttachments.value && currentCanUpdate.value && !isViewingHistorical.value && !isTimeTravelActive.value);
-const canCreate = computed(() => !isTimeTravelActive.value && creatableDatabases.value.length > 0);
+const isViewingHistorical = computed(
+  () => viewingHistoricalSnapshot.value !== null,
+);
+const activeDocumentView = computed(
+  () => viewingHistoricalSnapshot.value ?? currentDocument.value,
+);
+const activeRevisionId = computed<MindooDBAppDocumentRevisionId | null>(
+  () => viewingHistoricalSnapshot.value?.revisionId ?? null,
+);
+const canUseAttachments = computed(
+  () =>
+    currentDatabaseInfo.value?.capabilities.includes("attachments") ?? false,
+);
+const canManageAttachments = computed(
+  () =>
+    canUseAttachments.value &&
+    currentCanUpdate.value &&
+    !isViewingHistorical.value &&
+    !isTimeTravelActive.value,
+);
+const canCreate = computed(
+  () => !isTimeTravelActive.value && creatableDatabases.value.length > 0,
+);
 const subjectDirty = computed(() => subject.value !== savedSubject.value);
-const tagsDirty = computed(() => JSON.stringify(tags.value) !== JSON.stringify(savedTags.value));
-const hasLocalEdits = computed(() => isDirty.value || subjectDirty.value || tagsDirty.value);
-const canSave = computed(() => Boolean(!isViewingHistorical.value && !isTimeTravelActive.value && hasLocalEdits.value && currentCanUpdate.value && currentDatabase.value && currentDocument.value));
-const canDelete = computed(() => Boolean(!isViewingHistorical.value && !isTimeTravelActive.value && currentCanDelete.value && currentDatabase.value && currentDocument.value));
-const canRefresh = computed(() => Boolean(currentDatabase.value && currentDocument.value));
-const canShowInfo = computed(() => Boolean(currentDatabaseId.value && currentDocument.value));
+const tagsDirty = computed(
+  () => JSON.stringify(tags.value) !== JSON.stringify(savedTags.value),
+);
+const hasLocalEdits = computed(
+  () => isDirty.value || subjectDirty.value || tagsDirty.value,
+);
+const canSave = computed(() =>
+  Boolean(
+    !isViewingHistorical.value &&
+    !isTimeTravelActive.value &&
+    hasLocalEdits.value &&
+    currentCanUpdate.value &&
+    currentDatabase.value &&
+    currentDocument.value,
+  ),
+);
+const canDelete = computed(() =>
+  Boolean(
+    !isViewingHistorical.value &&
+    !isTimeTravelActive.value &&
+    currentCanDelete.value &&
+    currentDatabase.value &&
+    currentDocument.value,
+  ),
+);
+const canRefresh = computed(() =>
+  Boolean(currentDatabase.value && currentDocument.value),
+);
+const canShowInfo = computed(() =>
+  Boolean(currentDatabaseId.value && currentDocument.value),
+);
 const canPrint = computed(() => Boolean(currentDocument.value));
+const canExportDocx = computed(() => Boolean(currentDocument.value));
 const canExportMarkdown = computed(() => Boolean(currentDocument.value));
-const activeAttachments = computed(() => activeDocumentView.value?.attachments ?? []);
+const activeAttachments = computed(
+  () => activeDocumentView.value?.attachments ?? [],
+);
 const hasAttachments = computed(() => activeAttachments.value.length > 0);
 const canExportMarkdownWithAttachments = computed(() =>
-  Boolean(currentDatabase.value && currentDocument.value && hasAttachments.value));
+  Boolean(
+    currentDatabase.value && currentDocument.value && hasAttachments.value,
+  ),
+);
 const currentRevisionId = computed(() => {
   if (viewingHistoricalSnapshot.value?.revisionId) {
     return viewingHistoricalSnapshot.value.revisionId;
   }
-  return revisionEntries.value.find((entry) => entry.isCurrent)?.revisionId ?? null;
+  return (
+    revisionEntries.value.find((entry) => entry.isCurrent)?.revisionId ?? null
+  );
 });
 const statusBadgeLabel = computed(() => {
   if (viewingHistoricalSnapshot.value) {
@@ -185,7 +296,9 @@ const statusBadgeLabel = computed(() => {
   }
   return `Current · ${hasLocalEdits.value ? "Unsaved" : "Saved"}`;
 });
-const editorReadOnly = computed(() => isViewingHistorical.value || isTimeTravelActive.value);
+const editorReadOnly = computed(
+  () => isViewingHistorical.value || isTimeTravelActive.value,
+);
 const statusBadgeTooltip = computed(() => {
   if (isViewingHistorical.value) {
     return "You're viewing a historical revision. Click to pick a different version or return to the current one.";
@@ -195,10 +308,16 @@ const statusBadgeTooltip = computed(() => {
   }
   return "You're viewing the current version. Click to browse older revisions.";
 });
-const splitterLayout = computed(() => previewPanePosition.value === "bottom" ? "vertical" : "horizontal");
-const documentTitle = computed(() => subject.value.trim() || "Untitled document");
+const splitterLayout = computed(() =>
+  previewPanePosition.value === "bottom" ? "vertical" : "horizontal",
+);
+const documentTitle = computed(
+  () => subject.value.trim() || "Untitled document",
+);
 const currentDatabaseLabel = computed(() => {
-  const info = databases.value.find((database) => database.id === currentDatabaseId.value);
+  const info = databases.value.find(
+    (database) => database.id === currentDatabaseId.value,
+  );
   if (info?.title) {
     return `${info.title} (${currentDatabaseId.value})`;
   }
@@ -221,13 +340,13 @@ const {
   formatAttachmentSize,
   previewAttachment,
   removeAttachment,
+  scanAttachment,
   uploadAttachments,
   uploadInputKey: attachmentUploadInputKey,
 } = useDocumentAttachments({
   database: currentDatabase,
   document: activeDocumentView,
   revisionId: activeRevisionId,
-  runtime: currentRuntime,
   onDocumentRefresh(document) {
     currentDocument.value = document;
   },
@@ -302,6 +421,14 @@ const menuItems = computed<MenuItem[]>(() => [
       },
       { separator: true },
       {
+        label: "Export DOCX",
+        icon: "pi pi-file-word",
+        disabled: !canExportDocx.value,
+        command: () => {
+          void exportCurrentDocx();
+        },
+      },
+      {
         label: "Export Markdown",
         icon: "pi pi-file-export",
         disabled: !canExportMarkdown.value,
@@ -372,14 +499,17 @@ onMounted(async () => {
     cleanupTheme = nextSession.onThemeChange((theme) => applyAppTheme(theme));
     currentRuntime.value = context.runtime;
     hostUiPreferences.value = { ...context.uiPreferences };
-    cleanupUiPreferences = nextSession.onUiPreferencesChange((uiPreferences) => {
-      hostUiPreferences.value = { ...uiPreferences };
-    });
+    cleanupUiPreferences = nextSession.onUiPreferencesChange(
+      (uiPreferences) => {
+        hostUiPreferences.value = { ...uiPreferences };
+      },
+    );
     databases.value = context.databases;
-    selectedDatabaseId.value = context.preferredDatabaseId
-      ?? readableDatabases.value[0]?.id
-      ?? context.databases[0]?.id
-      ?? "";
+    selectedDatabaseId.value =
+      context.preferredDatabaseId ??
+      readableDatabases.value[0]?.id ??
+      context.databases[0]?.id ??
+      "";
     status.value = "Connected. Choose File / New or File / Open.";
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
@@ -393,7 +523,13 @@ onBeforeUnmount(async () => {
 });
 
 watch(
-  () => [markdown.value, currentDatabaseId.value, currentDocument.value?.id, imageResolver.revision.value] as const,
+  () =>
+    [
+      markdown.value,
+      currentDatabaseId.value,
+      currentDocument.value?.id,
+      imageResolver.revision.value,
+    ] as const,
   () => {
     void imageResolver.preloadMarkdownImages(markdown.value);
   },
@@ -444,10 +580,13 @@ watch(
     if (typeof localStorage === "undefined") {
       return;
     }
-    localStorage.setItem(PREVIEW_PANE_SETTINGS_KEY, JSON.stringify({
-      showPreviewPane: nextShowPreviewPane,
-      previewPanePosition: nextPreviewPanePosition,
-    }));
+    localStorage.setItem(
+      PREVIEW_PANE_SETTINGS_KEY,
+      JSON.stringify({
+        showPreviewPane: nextShowPreviewPane,
+        previewPanePosition: nextPreviewPanePosition,
+      }),
+    );
   },
 );
 
@@ -484,9 +623,11 @@ async function handleOpenDatabaseChange() {
   try {
     const previousDocumentId = selectedOpenDocId.value;
     await rebuildOpenNavigator();
-    selectedOpenDocId.value = openDialogDocuments.value.some((document) => document.id === previousDocumentId)
+    selectedOpenDocId.value = openDialogDocuments.value.some(
+      (document) => document.id === previousDocumentId,
+    )
       ? previousDocumentId
-      : openDialogDocuments.value[0]?.id ?? "";
+      : (openDialogDocuments.value[0]?.id ?? "");
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
   }
@@ -500,7 +641,9 @@ async function selectOpenCategory(key: string) {
 async function rebuildOpenNavigator() {
   const databaseInfo = selectedDatabaseInfo.value;
   if (!databaseInfo?.capabilities.includes("views")) {
-    throw new Error("This database does not expose the views capability required for categorized Open.");
+    throw new Error(
+      "This database does not expose the views capability required for categorized Open.",
+    );
   }
   await disposeOpenNavigator();
   if (!session.value) {
@@ -519,7 +662,10 @@ async function rebuildOpenNavigator() {
   await navigator.expandAll();
   const entries = await collectNavigatorEntries(navigator);
   const documents = dedupeDocumentEntries(entries);
-  const categories = buildOpenCategoryTree(entries.filter((entry) => entry.kind === "category"), documents.length);
+  const categories = buildOpenCategoryTree(
+    entries.filter((entry) => entry.kind === "category"),
+    documents.length,
+  );
   openNavigator.value = navigator;
   openCategoryNodes.value = categories.roots;
   selectedOpenCategoryKey.value = ALL_DOCUMENTS_NODE_KEY;
@@ -533,9 +679,15 @@ async function refreshOpenDocumentsForSelectedCategory() {
   if (!navigator || selectedOpenCategoryKey.value === ALL_DOCUMENTS_NODE_KEY) {
     openDialogDocuments.value = allOpenDialogDocuments.value;
   } else {
-    openDialogDocuments.value = mapDocumentEntries(await navigator.childDocuments(selectedOpenCategoryKey.value));
+    openDialogDocuments.value = mapDocumentEntries(
+      await navigator.childDocuments(selectedOpenCategoryKey.value),
+    );
   }
-  if (!openDialogDocuments.value.some((document) => document.id === selectedOpenDocId.value)) {
+  if (
+    !openDialogDocuments.value.some(
+      (document) => document.id === selectedOpenDocId.value,
+    )
+  ) {
     selectedOpenDocId.value = openDialogDocuments.value[0]?.id ?? "";
   }
 }
@@ -571,9 +723,10 @@ function resetPropertiesDraft() {
 /** Create a new empty markdown document. */
 async function newFile() {
   try {
-    const targetDatabaseInfo = selectedDatabaseInfo.value?.capabilities.includes("create")
-      ? selectedDatabaseInfo.value
-      : creatableDatabases.value[0];
+    const targetDatabaseInfo =
+      selectedDatabaseInfo.value?.capabilities.includes("create")
+        ? selectedDatabaseInfo.value
+        : creatableDatabases.value[0];
     if (!targetDatabaseInfo) {
       throw new Error("No writable database is available.");
     }
@@ -631,37 +784,55 @@ function requestRefreshCurrentDocument() {
 }
 
 async function openRevisionDialog() {
-  if (!currentDatabase.value || !currentDocument.value || !currentCanBrowseHistory.value) {
+  if (
+    !currentDatabase.value ||
+    !currentDocument.value ||
+    !currentCanBrowseHistory.value
+  ) {
     return;
   }
   revisionDialogVisible.value = true;
   revisionLoading.value = true;
   revisionErrorMessage.value = null;
   try {
-    revisionEntries.value = await currentDatabase.value.documents.listHistory(currentDocument.value.id);
+    revisionEntries.value = await currentDatabase.value.documents.listHistory(
+      currentDocument.value.id,
+    );
   } catch (error) {
-    revisionErrorMessage.value = error instanceof Error ? error.message : "The revision list could not be loaded.";
+    revisionErrorMessage.value =
+      error instanceof Error
+        ? error.message
+        : "The revision list could not be loaded.";
   } finally {
     revisionLoading.value = false;
   }
 }
 
-async function loadHistoricalRevision(revisionId: MindooDBAppDocumentRevisionId) {
+async function loadHistoricalRevision(
+  revisionId: MindooDBAppDocumentRevisionId,
+) {
   if (!currentDatabase.value || !currentDocument.value) {
     status.value = "Open a document before loading revisions.";
     return;
   }
-  if (revisionEntries.value.find((entry) => entry.revisionId === revisionId)?.isCurrent) {
+  if (
+    revisionEntries.value.find((entry) => entry.revisionId === revisionId)
+      ?.isCurrent
+  ) {
     revisionDialogVisible.value = false;
     returnToCurrent();
     return;
   }
   try {
-    const snapshot = await currentDatabase.value.documents.getAtRevision(currentDocument.value.id, revisionId);
+    const snapshot = await currentDatabase.value.documents.getAtRevision(
+      currentDocument.value.id,
+      revisionId,
+    );
     if (snapshot.state !== "exists" || !snapshot.data) {
-      status.value = snapshot.state === "deleted"
-        ? "That revision is a deletion marker and cannot be opened in the editor."
-        : "That revision is no longer available.";
+      status.value =
+        snapshot.state === "deleted"
+          ? "That revision is a deletion marker and cannot be opened in the editor."
+          : "That revision is no longer available.";
       return;
     }
     viewingHistoricalSnapshot.value = snapshot;
@@ -680,7 +851,10 @@ async function loadHistoricalRevision(revisionId: MindooDBAppDocumentRevisionId)
     });
     status.value = `Loaded revision from ${formatRevisionDate(snapshot.timestamp)}.`;
   } catch (error) {
-    status.value = error instanceof Error ? error.message : "The revision could not be loaded.";
+    status.value =
+      error instanceof Error
+        ? error.message
+        : "The revision could not be loaded.";
   }
 }
 
@@ -702,7 +876,8 @@ function returnToCurrent() {
   savedTags.value = readTags(currentDocument.value);
   tags.value = [...savedTags.value];
   suppressEditorUpdate = true;
-  markdown.value = textBuffer.value?.value ?? readDocumentBody(currentDocument.value);
+  markdown.value =
+    textBuffer.value?.value ?? readDocumentBody(currentDocument.value);
   isDirty.value = false;
   queueMicrotask(() => {
     suppressEditorUpdate = false;
@@ -717,12 +892,18 @@ async function refreshCurrentDocument() {
     return;
   }
   try {
-    const document = await currentDatabase.value.documents.get(currentDocument.value.id);
+    const document = await currentDatabase.value.documents.get(
+      currentDocument.value.id,
+    );
     if (!document) {
       throw new Error("The current document could not be loaded.");
     }
     refreshConfirmVisible.value = false;
-    loadDocumentIntoEditor(currentDatabase.value, currentDatabaseId.value, document);
+    loadDocumentIntoEditor(
+      currentDatabase.value,
+      currentDatabaseId.value,
+      document,
+    );
     status.value = "Refreshed from Haven.";
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
@@ -735,7 +916,10 @@ function copyWithTextareaFallback(value: string) {
   }
 
   const textarea = document.createElement("textarea");
-  const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const activeElement =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
   textarea.value = value;
   textarea.setAttribute("readonly", "true");
   textarea.setAttribute("aria-hidden", "true");
@@ -784,7 +968,8 @@ async function printCurrentDocument() {
 
   const printWindow = window.open("", "_blank");
   if (!printWindow) {
-    status.value = "Pop-up blocked. Allow pop-ups for this app to print the document.";
+    status.value =
+      "Pop-up blocked. Allow pop-ups for this app to print the document.";
     return;
   }
 
@@ -811,10 +996,39 @@ async function exportCurrentMarkdown() {
   }
 
   try {
-    const saved = await exportMarkdownFile(markdown.value, subject.value || "Untitled document");
-    status.value = saved ? "Exported markdown file." : "Markdown export cancelled.";
+    const saved = await exportMarkdownFile(
+      markdown.value,
+      subject.value || "Untitled document",
+    );
+    status.value = saved
+      ? "Exported markdown file."
+      : "Markdown export cancelled.";
   } catch (error) {
-    status.value = error instanceof Error ? error.message : "The markdown export failed.";
+    status.value =
+      error instanceof Error ? error.message : "The markdown export failed.";
+  }
+}
+
+/** Export a Word document with embedded renderable images and Mermaid diagrams. */
+async function exportCurrentDocx() {
+  if (!currentDocument.value) {
+    status.value = "Open a document before exporting.";
+    return;
+  }
+
+  try {
+    status.value = "Preparing DOCX export...";
+    await imageResolver.preloadMarkdownImages(markdown.value);
+    const saved = await exportDocxFile({
+      markdown: markdown.value,
+      title: subject.value || "Untitled document",
+      attachments: activeAttachments.value,
+      resolveImageUrl: (url) => imageResolver.getCachedImageUrl(url),
+    });
+    status.value = saved ? "Exported DOCX file." : "DOCX export cancelled.";
+  } catch (error) {
+    status.value =
+      error instanceof Error ? error.message : "The DOCX export failed.";
   }
 }
 
@@ -848,9 +1062,14 @@ async function exportCurrentMarkdownWithAttachments() {
       attachments,
       revisionId: activeRevisionId.value ?? undefined,
     });
-    status.value = saved ? "Exported markdown package." : "Markdown package export cancelled.";
+    status.value = saved
+      ? "Exported markdown package."
+      : "Markdown package export cancelled.";
   } catch (error) {
-    status.value = error instanceof Error ? error.message : "The markdown package export failed.";
+    status.value =
+      error instanceof Error
+        ? error.message
+        : "The markdown package export failed.";
   }
 }
 
@@ -868,7 +1087,8 @@ async function saveFile() {
     return;
   }
   if (!currentCanUpdate.value) {
-    status.value = "This application does not have write access to the current document database.";
+    status.value =
+      "This application does not have write access to the current document database.";
     return;
   }
   if (editorReadOnly.value) {
@@ -919,7 +1139,8 @@ async function deleteCurrentDocument() {
     return;
   }
   if (!currentCanDelete.value) {
-    status.value = "This application does not have delete access to the current document database.";
+    status.value =
+      "This application does not have delete access to the current document database.";
     return;
   }
   if (editorReadOnly.value) {
@@ -956,12 +1177,21 @@ async function uploadEditorImage(file: File) {
     throw new Error("Open or create a document before inserting images.");
   }
   if (!canManageAttachments.value) {
-    throw new Error("This application does not have attachment upload access for the current document database.");
+    throw new Error(
+      "This application does not have attachment upload access for the current document database.",
+    );
   }
 
   const attachmentName = createUniqueImageAttachmentName(file.name);
-  await uploadFileAttachment(currentDatabase.value, currentDocument.value.id, attachmentName, file);
-  const refreshed = await currentDatabase.value.documents.get(currentDocument.value.id);
+  await uploadFileAttachment(
+    currentDatabase.value,
+    currentDocument.value.id,
+    attachmentName,
+    file,
+  );
+  const refreshed = await currentDatabase.value.documents.get(
+    currentDocument.value.id,
+  );
   if (refreshed) {
     currentDocument.value = refreshed;
   }
@@ -989,7 +1219,8 @@ function requestAttachmentInsertFromEditor(): Promise<AttachmentInsertion | null
     return Promise.resolve(null);
   }
   if (!canUseAttachments.value) {
-    status.value = "This application does not have attachment access for the current document database.";
+    status.value =
+      "This application does not have attachment access for the current document database.";
     return Promise.resolve(null);
   }
   if (editorReadOnly.value) {
@@ -1029,7 +1260,11 @@ function handleAttachmentPickerCancel() {
  * The buffer stores the document heads from the snapshot so later saves can be
  * merged correctly with concurrent changes.
  */
-function loadDocumentIntoEditor(database: MindooDBAppDatabase, databaseId: string, document: MindooDBAppDocument) {
+function loadDocumentIntoEditor(
+  database: MindooDBAppDatabase,
+  databaseId: string,
+  document: MindooDBAppDocument,
+) {
   imageResolver.clear();
   currentDatabase.value = database;
   currentDatabaseId.value = databaseId;
@@ -1103,14 +1338,15 @@ function formatRevisionDate(timestamp: number) {
     timeStyle: "short",
   }).format(new Date(timestamp));
 }
-
 </script>
 
 <template>
   <main class="app-shell">
     <header
       class="toolbar glass-card"
-      :class="{ 'toolbar--ios-multitasking': hostUiPreferences.iosMultitaskingOptimized }"
+      :class="{
+        'toolbar--ios-multitasking': hostUiPreferences.iosMultitaskingOptimized,
+      }"
     >
       <div class="toolbar__leading">
         <span class="toolbar__title">TeamEdit</span>
@@ -1121,8 +1357,16 @@ function formatRevisionDate(timestamp: number) {
           rounded
           severity="secondary"
           class="toolbar__refresh"
-          :aria-label="isViewingHistorical ? 'Return to current version' : 'Refresh document'"
-          :title="isViewingHistorical ? 'Return to current version' : 'Refresh document'"
+          :aria-label="
+            isViewingHistorical
+              ? 'Return to current version'
+              : 'Refresh document'
+          "
+          :title="
+            isViewingHistorical
+              ? 'Return to current version'
+              : 'Refresh document'
+          "
           :disabled="!canRefresh"
           @click="requestRefreshCurrentDocument"
         />
@@ -1158,16 +1402,36 @@ function formatRevisionDate(timestamp: number) {
             :layout="splitterLayout"
             class="editor-preview-splitter"
           >
-            <SplitterPanel :size="previewPanePosition === 'bottom' ? 60 : 62" :min-size="25" class="splitter-panel">
-              <section class="editor-panel glass-card" :class="{ 'editor-panel--history': editorReadOnly }">
+            <SplitterPanel
+              :size="previewPanePosition === 'bottom' ? 60 : 62"
+              :min-size="25"
+              class="splitter-panel"
+            >
+              <section
+                class="editor-panel glass-card"
+                :class="{ 'editor-panel--history': editorReadOnly }"
+              >
                 <div v-if="isTimeTravelActive" class="history-banner">
                   <i class="pi pi-clock" aria-hidden="true" />
-                  <span>Time travel mode is active as of {{ timeTravelDateLabel }} - read-only.</span>
+                  <span
+                    >Time travel mode is active as of
+                    {{ timeTravelDateLabel }} - read-only.</span
+                  >
                 </div>
                 <div v-if="isViewingHistorical" class="history-banner">
                   <i class="pi pi-history" aria-hidden="true" />
-                  <span>You're viewing the version from {{ formatRevisionDate(viewingHistoricalSnapshot?.timestamp ?? 0) }} - read-only.</span>
-                  <button type="button" @click="returnToCurrent">Return to current</button>
+                  <span
+                    >You're viewing the version from
+                    {{
+                      formatRevisionDate(
+                        viewingHistoricalSnapshot?.timestamp ?? 0,
+                      )
+                    }}
+                    - read-only.</span
+                  >
+                  <button type="button" @click="returnToCurrent">
+                    Return to current
+                  </button>
                 </div>
                 <MilkdownMarkdownEditor
                   :model-value="markdown"
@@ -1180,23 +1444,46 @@ function formatRevisionDate(timestamp: number) {
               </section>
             </SplitterPanel>
 
-            <SplitterPanel :size="previewPanePosition === 'bottom' ? 40 : 38" :min-size="20" class="splitter-panel">
+            <SplitterPanel
+              :size="previewPanePosition === 'bottom' ? 40 : 38"
+              :min-size="20"
+              class="splitter-panel"
+            >
               <section class="preview-panel glass-card">
                 <p class="eyebrow">Preview</p>
-                <article ref="previewRoot" class="markdown-preview" v-html="renderedMarkdown" />
+                <article
+                  ref="previewRoot"
+                  class="markdown-preview"
+                  v-html="renderedMarkdown"
+                />
               </section>
             </SplitterPanel>
           </Splitter>
 
-          <section v-else class="editor-panel glass-card" :class="{ 'editor-panel--history': editorReadOnly }">
+          <section
+            v-else
+            class="editor-panel glass-card"
+            :class="{ 'editor-panel--history': editorReadOnly }"
+          >
             <div v-if="isTimeTravelActive" class="history-banner">
               <i class="pi pi-clock" aria-hidden="true" />
-              <span>Time travel mode is active as of {{ timeTravelDateLabel }} - read-only.</span>
+              <span
+                >Time travel mode is active as of {{ timeTravelDateLabel }} -
+                read-only.</span
+              >
             </div>
             <div v-if="isViewingHistorical" class="history-banner">
               <i class="pi pi-history" aria-hidden="true" />
-              <span>You're viewing the version from {{ formatRevisionDate(viewingHistoricalSnapshot?.timestamp ?? 0) }} - read-only.</span>
-              <button type="button" @click="returnToCurrent">Return to current</button>
+              <span
+                >You're viewing the version from
+                {{
+                  formatRevisionDate(viewingHistoricalSnapshot?.timestamp ?? 0)
+                }}
+                - read-only.</span
+              >
+              <button type="button" @click="returnToCurrent">
+                Return to current
+              </button>
             </div>
             <MilkdownMarkdownEditor
               :model-value="markdown"
@@ -1219,6 +1506,7 @@ function formatRevisionDate(timestamp: number) {
           :can-preview-attachment="canPreviewAttachment"
           :format-attachment-size="formatAttachmentSize"
           @upload="uploadAttachments"
+          @scan="scanAttachment"
           @preview="previewAttachment"
           @download="downloadAttachment"
           @remove="removeDocumentAttachment"
@@ -1226,20 +1514,49 @@ function formatRevisionDate(timestamp: number) {
       </template>
       <section v-else class="empty-state">
         <h1>Collaborative markdown documents</h1>
-        <p>Create a new markdown document or open an existing one. Write with rich formatting, attach images and files, and edit alongside your teammates with real-time updates.</p>
+        <p>
+          Create a new markdown document or open an existing one. Write with
+          rich formatting, attach images and files, and edit alongside your
+          teammates with real-time updates.
+        </p>
         <div class="empty-state__actions">
-          <Button label="New document" icon="pi pi-file-plus" :disabled="!canCreate" @click="newFile" />
-          <Button label="Open document" icon="pi pi-folder-open" severity="secondary" :disabled="readableDatabases.length === 0" @click="openFileDialog" />
+          <Button
+            label="New document"
+            icon="pi pi-file-plus"
+            :disabled="!canCreate"
+            @click="newFile"
+          />
+          <Button
+            label="Open document"
+            icon="pi pi-folder-open"
+            severity="secondary"
+            :disabled="readableDatabases.length === 0"
+            @click="openFileDialog"
+          />
         </div>
       </section>
     </section>
 
-    <Dialog v-model:visible="openDialogVisible" modal header="Open Markdown Document" :style="{ width: '58rem', maxWidth: '96vw' }" @hide="disposeOpenNavigator">
+    <Dialog
+      v-model:visible="openDialogVisible"
+      modal
+      header="Open Markdown Document"
+      :style="{ width: '58rem', maxWidth: '96vw' }"
+      @hide="disposeOpenNavigator"
+    >
       <div class="dialog-content">
         <label class="field">
           <span class="field-label">Database</span>
-          <select v-model="selectedDatabaseId" class="native-input" @change="handleOpenDatabaseChange">
-            <option v-for="database in readableDatabases" :key="database.id" :value="database.id">
+          <select
+            v-model="selectedDatabaseId"
+            class="native-input"
+            @change="handleOpenDatabaseChange"
+          >
+            <option
+              v-for="database in readableDatabases"
+              :key="database.id"
+              :value="database.id"
+            >
               {{ database.title || database.id }}
             </option>
           </select>
@@ -1257,7 +1574,9 @@ function formatRevisionDate(timestamp: number) {
               v-for="document in openDialogDocuments"
               :key="document.id"
               class="document-row"
-              :class="{ 'document-row--selected': document.id === selectedOpenDocId }"
+              :class="{
+                'document-row--selected': document.id === selectedOpenDocId,
+              }"
               type="button"
               @click="selectedOpenDocId = document.id"
               @dblclick="openSelectedDocument"
@@ -1266,31 +1585,75 @@ function formatRevisionDate(timestamp: number) {
               <small>{{ document.detail }}</small>
               <small>{{ document.id }}</small>
             </button>
-            <p v-if="openDialogDocuments.length === 0" class="document-list__empty">No documents in this category.</p>
+            <p
+              v-if="openDialogDocuments.length === 0"
+              class="document-list__empty"
+            >
+              No documents in this category.
+            </p>
           </div>
         </div>
       </div>
       <template #footer>
-        <Button label="Cancel" severity="secondary" @click="openDialogVisible = false" />
-        <Button label="Open" :disabled="!selectedOpenDocId" @click="openSelectedDocument" />
+        <Button
+          label="Cancel"
+          severity="secondary"
+          @click="openDialogVisible = false"
+        />
+        <Button
+          label="Open"
+          :disabled="!selectedOpenDocId"
+          @click="openSelectedDocument"
+        />
       </template>
     </Dialog>
 
-    <Dialog v-model:visible="propertiesDialogVisible" modal header="Document properties" :style="{ width: '34rem', maxWidth: '96vw' }">
+    <Dialog
+      v-model:visible="propertiesDialogVisible"
+      modal
+      header="Document properties"
+      :style="{ width: '34rem', maxWidth: '96vw' }"
+    >
       <div class="dialog-content">
         <label class="field">
           <span class="field-label">Title</span>
-          <input v-model="propertiesTitleDraft" class="native-input" type="text" autocomplete="off" placeholder="Document title">
+          <input
+            v-model="propertiesTitleDraft"
+            class="native-input"
+            type="text"
+            autocomplete="off"
+            placeholder="Document title"
+          />
         </label>
         <label class="field">
           <span class="field-label">Tags</span>
-          <textarea v-model="propertiesTagsDraft" class="native-input native-input--textarea" rows="6" placeholder="Work\Planning&#10;Customer\ABC" />
+          <textarea
+            v-model="propertiesTagsDraft"
+            class="native-input native-input--textarea"
+            rows="6"
+            placeholder="Work\Planning&#10;Customer\ABC"
+          />
         </label>
-        <p class="field-hint">Enter one tag per line. Use a backslash to create hierarchy, for example <code>Work\Planning</code>.</p>
+        <p class="field-hint">
+          Enter one tag per line. Use a backslash to create hierarchy, for
+          example <code>Work\Planning</code>.
+        </p>
       </div>
       <template #footer>
-        <Button label="Cancel" text @click="propertiesDialogVisible = false; resetPropertiesDraft()" />
-        <Button label="Apply" icon="pi pi-check" :disabled="editorReadOnly" @click="applyDocumentProperties" />
+        <Button
+          label="Cancel"
+          text
+          @click="
+            propertiesDialogVisible = false;
+            resetPropertiesDraft();
+          "
+        />
+        <Button
+          label="Apply"
+          icon="pi pi-check"
+          :disabled="editorReadOnly"
+          @click="applyDocumentProperties"
+        />
       </template>
     </Dialog>
 
@@ -1301,7 +1664,8 @@ function formatRevisionDate(timestamp: number) {
       :style="{ width: '28rem', maxWidth: '96vw' }"
     >
       <p>
-        Refreshing will reload this document from Haven and discard unsaved changes in this window.
+        Refreshing will reload this document from Haven and discard unsaved
+        changes in this window.
       </p>
       <template #footer>
         <Button label="Cancel" text @click="refreshConfirmVisible = false" />
@@ -1321,7 +1685,8 @@ function formatRevisionDate(timestamp: number) {
       :style="{ width: '28rem', maxWidth: '96vw' }"
     >
       <p>
-        Delete document <code>{{ currentDocument?.id }}</code>? This removes it from the current database.
+        Delete document <code>{{ currentDocument?.id }}</code
+        >? This removes it from the current database.
       </p>
       <template #footer>
         <Button label="Cancel" text @click="deleteConfirmVisible = false" />
@@ -1683,7 +2048,8 @@ button.toolbar__status-badge:focus-visible {
 }
 
 .markdown-preview :deep(code) {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.92em;
 }
 
