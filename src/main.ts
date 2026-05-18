@@ -13,14 +13,22 @@ import "@milkdown/crepe/theme/common/style.css";
 import App from "./App.vue";
 import "@/assets/styles/main.css";
 import { applyAppTheme, buildPrimeVueTheme } from "@/lib/theme";
+import { registerTeamEditServiceWorker } from "@/pwa/appUpdate";
+import { TEAMEDIT_BOOT_COMPLETED_EVENT } from "@/pwa/bootRecovery";
 
-const app = createApp(App);
+async function bootstrap() {
+  const app = createApp(App);
 
-app.use(PrimeVue, {
-  ripple: true,
-  theme: buildPrimeVueTheme(),
-});
-app.directive("tooltip", Tooltip);
+  app.use(PrimeVue, {
+    ripple: true,
+    theme: buildPrimeVueTheme(),
+  });
+  app.directive("tooltip", Tooltip);
 
-applyAppTheme();
-app.mount("#app");
+  applyAppTheme();
+  void registerTeamEditServiceWorker();
+  app.mount("#app");
+  window.dispatchEvent(new Event(TEAMEDIT_BOOT_COMPLETED_EVENT));
+}
+
+void bootstrap();

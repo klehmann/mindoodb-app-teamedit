@@ -11,6 +11,7 @@ import "highlight.js/styles/github.css";
 import Button from "primevue/button";
 import Dialog from "primevue/dialog";
 import Menubar from "primevue/menubar";
+import Message from "primevue/message";
 import Splitter from "primevue/splitter";
 import SplitterPanel from "primevue/splitterpanel";
 import type { MenuItem } from "primevue/menuitem";
@@ -60,6 +61,7 @@ import {
 import { renderMermaidPlaceholders } from "@/lib/mermaid";
 import { renderAndPrintMarkdownWindow } from "@/lib/printMarkdown";
 import { applyAppTheme } from "@/lib/theme";
+import { useTeamEditAppUpdate } from "@/pwa/appUpdate";
 import {
   ALL_DOCUMENTS_NODE_KEY,
   buildOpenCategoryTree,
@@ -108,6 +110,8 @@ function readPreviewPaneSettings() {
 }
 
 const previewPaneSettings = readPreviewPaneSettings();
+const { updateAvailable, updateReloading, reloadForUpdate } =
+  useTeamEditAppUpdate();
 
 // Bridge/session state is kept in this root component because TeamEdit is a
 // small sample app with one active document at a time.
@@ -1342,6 +1346,29 @@ function formatRevisionDate(timestamp: number) {
 
 <template>
   <main class="app-shell">
+    <Message
+      v-if="updateAvailable"
+      severity="warn"
+      :closable="false"
+      class="app-update-banner"
+    >
+      <div class="app-update-banner__content">
+        <div class="app-update-banner__copy">
+          <strong>New version available</strong>
+          <p>
+            Reload TeamEdit to switch to the latest version and refresh
+            offline assets.
+          </p>
+        </div>
+        <Button
+          label="Reload now"
+          size="small"
+          :loading="updateReloading"
+          @click="reloadForUpdate"
+        />
+      </div>
+    </Message>
+
     <header
       class="toolbar glass-card"
       :class="{
@@ -1352,11 +1379,22 @@ function formatRevisionDate(timestamp: number) {
         <span class="toolbar__title">TeamEdit</span>
         <Menubar :model="menuItems" class="toolbar__menubar" />
         <Button
+          icon="pi pi-save"
+          text
+          rounded
+          severity="secondary"
+          class="toolbar__icon-button"
+          aria-label="Save document"
+          title="Save document"
+          :disabled="!canSave"
+          @click="saveFile"
+        />
+        <Button
           :icon="isViewingHistorical ? 'pi pi-history' : 'pi pi-refresh'"
           text
           rounded
           severity="secondary"
-          class="toolbar__refresh"
+          class="toolbar__icon-button"
           :aria-label="
             isViewingHistorical
               ? 'Return to current version'
@@ -1772,6 +1810,31 @@ function formatRevisionDate(timestamp: number) {
   gap: 2px;
 }
 
+.app-update-banner {
+  left: 50%;
+  max-width: min(44rem, calc(100vw - 1.5rem));
+  position: fixed;
+  top: 0.75rem;
+  transform: translateX(-50%);
+  width: calc(100vw - 1.5rem);
+  z-index: 2400;
+}
+
+.app-update-banner__content {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+
+.app-update-banner__copy {
+  min-width: 0;
+}
+
+.app-update-banner__copy p {
+  margin: 0.2rem 0 0;
+}
+
 .toolbar {
   position: sticky;
   top: 2px;
@@ -1815,7 +1878,7 @@ function formatRevisionDate(timestamp: number) {
   min-height: 2rem;
 }
 
-.toolbar__refresh {
+.toolbar__icon-button {
   flex: 0 0 auto;
   width: 1.9rem;
   height: 1.9rem;
@@ -2360,6 +2423,11 @@ button.toolbar__status-badge:focus-visible {
 }
 
 @media (max-width: 720px) {
+  .app-update-banner__content {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .open-dialog__browser {
     grid-template-columns: 1fr;
   }
