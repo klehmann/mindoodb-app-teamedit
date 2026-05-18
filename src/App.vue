@@ -740,6 +740,7 @@ async function newFile() {
       set: {
         subject: "",
         tags: [],
+        form: "teamedit",
         body: "",
       },
     });
