@@ -72,7 +72,7 @@ export function buildOpenCategoryTree(categoryEntries: MindooDBAppViewEntry[], d
     const node: OpenCategoryNode = {
       key: entry.key,
       label: readCategoryLabel(entry),
-      count: entry.descendantDocumentCount,
+      count: entry.descendantDocumentCount ?? 0,
       children: [],
     };
     nodesByKey.set(node.key, node);
