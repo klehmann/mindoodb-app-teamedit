@@ -20,6 +20,7 @@ export interface OpenDocumentRow {
   key: string;
   id: string;
   title: string;
+  type: "markdown" | "word";
   tags: string[];
   detail: string;
 }
@@ -43,6 +44,13 @@ export function createOpenViewDefinition(): MindooDBAppViewDefinition {
         title: "Title",
         role: "display",
         expression: v.field("subject"),
+        sorting: "ascending",
+      },
+      {
+        name: "type",
+        title: "Type",
+        role: "display",
+        expression: v.field("type"),
         sorting: "ascending",
       },
     ],
@@ -114,6 +122,7 @@ function mapDocumentEntry(entry: MindooDBAppViewEntry) {
     key: entry.key,
     id: entry.docId,
     title: readTitle(entry),
+    type: readDocumentType(entry),
     tags,
     detail: tags.join(", ") || "Untagged",
   };
@@ -122,6 +131,10 @@ function mapDocumentEntry(entry: MindooDBAppViewEntry) {
 function readTitle(entry: MindooDBAppViewEntry) {
   const value = entry.columnValues.subject;
   return typeof value === "string" && value.trim() ? value : entry.docId ?? "Untitled document";
+}
+
+function readDocumentType(entry: MindooDBAppViewEntry): "markdown" | "word" {
+  return entry.columnValues.type === "word" ? "word" : "markdown";
 }
 
 function readCategoryLabel(entry: MindooDBAppViewEntry) {

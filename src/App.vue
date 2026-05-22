@@ -5,6 +5,7 @@ import {
   onBeforeUnmount,
   onMounted,
   ref,
+  shallowRef,
   watch,
 } from "vue";
 import "highlight.js/styles/github.css";
@@ -15,6 +16,7 @@ import Message from "primevue/message";
 import Splitter from "primevue/splitter";
 import SplitterPanel from "primevue/splitterpanel";
 import type { MenuItem } from "primevue/menuitem";
+import type { Document as DocxDocument } from "@eigenpal/docx-editor-core/types/document";
 import {
   createMindooDBAppBridge,
   createMindooDBTextBuffer,
@@ -36,6 +38,7 @@ import DocumentAttachmentsPanel from "@/components/DocumentAttachmentsPanel.vue"
 import DocumentRevisionDialog from "@/components/DocumentRevisionDialog.vue";
 import MilkdownMarkdownEditor from "@/components/MilkdownMarkdownEditor.vue";
 import TagTreeList from "@/components/TagTreeList.vue";
+import WordDocumentEditor from "@/editors/word/components/WordDocumentEditor.vue";
 import { useAttachmentImageResolver } from "@/composables/useAttachmentImageResolver";
 import { useDocumentAttachments } from "@/composables/useDocumentAttachments";
 import {
@@ -72,10 +75,20 @@ import {
   type OpenCategoryNode,
   type OpenDocumentRow,
 } from "@/lib/viewOpen";
+import {
+  commentsFromWordDocument,
+  documentToRichTextSpans,
+  plainTextToWordDocument,
+  richTextSpansToDocument,
+  summarizeRichTextSpans,
+  summarizeWordDocument,
+} from "@/editors/word/lib/richTextSpans";
 
 const PREVIEW_PANE_SETTINGS_KEY = "mindoodb-teamedit-preview-pane";
 
 type PreviewPanePosition = "right" | "bottom";
+type DocumentType = "markdown" | "word";
+type OpenDocumentTypeFilter = "all" | DocumentType;
 
 function readPreviewPaneSettings() {
   if (typeof localStorage === "undefined") {
@@ -122,6 +135,9 @@ const selectedDatabaseId = ref("");
 const currentDatabase = ref<MindooDBAppDatabase | null>(null);
 const currentDatabaseId = ref("");
 const currentDocument = ref<MindooDBAppDocument | null>(null);
+const currentDocumentType = ref<DocumentType>("markdown");
+const currentWordDocument = shallowRef<DocxDocument | null>(null);
+const wordEditorDocument = shallowRef<DocxDocument | null>(null);
 const viewingHistoricalSnapshot = ref<MindooDBAppHistoricalDocument | null>(
   null,
 );
@@ -164,6 +180,7 @@ const previewPanePosition = ref<PreviewPanePosition>(
 );
 const previewRoot = ref<HTMLElement | null>(null);
 const selectedOpenDocId = ref("");
+const selectedOpenType = ref<OpenDocumentTypeFilter>("all");
 const selectedOpenCategoryKey = ref(ALL_DOCUMENTS_NODE_KEY);
 const openCategoryNodes = ref<OpenCategoryNode[]>([]);
 const openDialogDocuments = ref<OpenDocumentRow[]>([]);
@@ -246,6 +263,8 @@ const tagsDirty = computed(
 const hasLocalEdits = computed(
   () => isDirty.value || subjectDirty.value || tagsDirty.value,
 );
+const isMarkdownDocument = computed(() => currentDocumentType.value === "markdown");
+const isWordDocument = computed(() => currentDocumentType.value === "word");
 const canSave = computed(() =>
   Boolean(
     !isViewingHistorical.value &&
@@ -271,16 +290,16 @@ const canRefresh = computed(() =>
 const canShowInfo = computed(() =>
   Boolean(currentDatabaseId.value && currentDocument.value),
 );
-const canPrint = computed(() => Boolean(currentDocument.value));
-const canExportDocx = computed(() => Boolean(currentDocument.value));
-const canExportMarkdown = computed(() => Boolean(currentDocument.value));
+const canPrint = computed(() => Boolean(currentDocument.value && isMarkdownDocument.value));
+const canExportDocx = computed(() => Boolean(currentDocument.value && isMarkdownDocument.value));
+const canExportMarkdown = computed(() => Boolean(currentDocument.value && isMarkdownDocument.value));
 const activeAttachments = computed(
   () => activeDocumentView.value?.attachments ?? [],
 );
 const hasAttachments = computed(() => activeAttachments.value.length > 0);
 const canExportMarkdownWithAttachments = computed(() =>
   Boolean(
-    currentDatabase.value && currentDocument.value && hasAttachments.value,
+    currentDatabase.value && currentDocument.value && isMarkdownDocument.value && hasAttachments.value,
   ),
 );
 const currentRevisionId = computed(() => {
@@ -374,11 +393,19 @@ const menuItems = computed<MenuItem[]>(() => [
     icon: "pi pi-file",
     items: [
       {
-        label: "New",
-        icon: "pi pi-file-plus",
+        label: "New Markdown Document",
+        icon: "pi pi-file",
         disabled: !canCreate.value,
         command: () => {
-          void newFile();
+          void newMarkdownFile();
+        },
+      },
+      {
+        label: "New Word Document",
+        icon: "pi pi-file-word",
+        disabled: !canCreate.value,
+        command: () => {
+          void newWordFile();
         },
       },
       {
@@ -642,6 +669,10 @@ async function selectOpenCategory(key: string) {
   await refreshOpenDocumentsForSelectedCategory();
 }
 
+async function handleOpenTypeChange() {
+  await refreshOpenDocumentsForSelectedCategory();
+}
+
 async function rebuildOpenNavigator() {
   const databaseInfo = selectedDatabaseInfo.value;
   if (!databaseInfo?.capabilities.includes("views")) {
@@ -674,24 +705,26 @@ async function rebuildOpenNavigator() {
   openCategoryNodes.value = categories.roots;
   selectedOpenCategoryKey.value = ALL_DOCUMENTS_NODE_KEY;
   allOpenDialogDocuments.value = documents;
-  openDialogDocuments.value = documents;
-  selectedOpenDocId.value = documents[0]?.id ?? "";
+  applyOpenDocumentTypeFilter(documents);
 }
 
 async function refreshOpenDocumentsForSelectedCategory() {
   const navigator = openNavigator.value;
+  let documents: OpenDocumentRow[];
   if (!navigator || selectedOpenCategoryKey.value === ALL_DOCUMENTS_NODE_KEY) {
-    openDialogDocuments.value = allOpenDialogDocuments.value;
+    documents = allOpenDialogDocuments.value;
   } else {
-    openDialogDocuments.value = mapDocumentEntries(
-      await navigator.childDocuments(selectedOpenCategoryKey.value),
-    );
+    documents = mapDocumentEntries(await navigator.childDocuments(selectedOpenCategoryKey.value));
   }
-  if (
-    !openDialogDocuments.value.some(
-      (document) => document.id === selectedOpenDocId.value,
-    )
-  ) {
+  applyOpenDocumentTypeFilter(documents);
+}
+
+function applyOpenDocumentTypeFilter(documents: OpenDocumentRow[]) {
+  openDialogDocuments.value =
+    selectedOpenType.value === "all"
+      ? documents
+      : documents.filter((document) => document.type === selectedOpenType.value);
+  if (!openDialogDocuments.value.some((document) => document.id === selectedOpenDocId.value)) {
     selectedOpenDocId.value = openDialogDocuments.value[0]?.id ?? "";
   }
 }
@@ -725,7 +758,7 @@ function resetPropertiesDraft() {
 }
 
 /** Create a new empty markdown document. */
-async function newFile() {
+async function newMarkdownFile() {
   try {
     const targetDatabaseInfo =
       selectedDatabaseInfo.value?.capabilities.includes("create")
@@ -740,12 +773,48 @@ async function newFile() {
       set: {
         subject: "",
         tags: [],
+        type: "markdown",
         form: "teamedit",
         body: "",
       },
     });
-    loadDocumentIntoEditor(database, targetDatabaseInfo.id, document);
+    await loadDocumentIntoEditor(database, targetDatabaseInfo.id, document);
     status.value = `Created ${document.id}.`;
+  } catch (error) {
+    status.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+/** Backwards-compatible default action for toolbar buttons. */
+async function newFile() {
+  await newMarkdownFile();
+}
+
+/** Create a new empty Word document shell. */
+async function newWordFile() {
+  try {
+    const targetDatabaseInfo =
+      selectedDatabaseInfo.value?.capabilities.includes("create")
+        ? selectedDatabaseInfo.value
+        : creatableDatabases.value[0];
+    if (!targetDatabaseInfo) {
+      throw new Error("No writable database is available.");
+    }
+    selectedDatabaseId.value = targetDatabaseInfo.id;
+    const database = await openDatabaseById(targetDatabaseInfo.id);
+    const document = await database.documents.create({
+      set: {
+        subject: "",
+        tags: [],
+        type: "word",
+        form: "teamedit",
+        body: "",
+        comments: [],
+      },
+    });
+    const refreshed = await database.documents.get(document.id);
+    await loadDocumentIntoEditor(database, targetDatabaseInfo.id, refreshed ?? document);
+    status.value = `Created Word document ${document.id}.`;
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
   }
@@ -762,7 +831,7 @@ async function openSelectedDocument() {
     if (!document) {
       throw new Error("Select a document to open.");
     }
-    loadDocumentIntoEditor(database, databaseId, document);
+    await loadDocumentIntoEditor(database, databaseId, document);
     openDialogVisible.value = false;
     await disposeOpenNavigator();
     status.value = `Opened ${document.id}.`;
@@ -904,7 +973,7 @@ async function refreshCurrentDocument() {
       throw new Error("The current document could not be loaded.");
     }
     refreshConfirmVisible.value = false;
-    loadDocumentIntoEditor(
+    await loadDocumentIntoEditor(
       currentDatabase.value,
       currentDatabaseId.value,
       document,
@@ -1021,6 +1090,17 @@ async function exportCurrentDocx() {
     return;
   }
 
+  if (isWordDocument.value) {
+    const attachmentName = readWordDocxAttachmentName(currentDocument.value);
+    if (!attachmentName) {
+      status.value = "Import a DOCX file before exporting this Word document.";
+      return;
+    }
+    await downloadAttachment(attachmentName);
+    status.value = "Exported original DOCX attachment.";
+    return;
+  }
+
   try {
     status.value = "Preparing DOCX export...";
     await imageResolver.preloadMarkdownImages(markdown.value);
@@ -1035,6 +1115,11 @@ async function exportCurrentDocx() {
     status.value =
       error instanceof Error ? error.message : "The DOCX export failed.";
   }
+}
+
+function readWordDocxAttachmentName(document: MindooDBAppDocument) {
+  const value = document.data.docxAttachment;
+  return typeof value === "string" && value.trim() ? value : null;
 }
 
 /**
@@ -1087,7 +1172,7 @@ async function exportCurrentMarkdownWithAttachments() {
  * that case we update Milkdown once with the reconciled content.
  */
 async function saveFile() {
-  if (!textBuffer.value || !currentDatabase.value || !currentDocument.value) {
+  if (!currentDatabase.value || !currentDocument.value) {
     status.value = "Open or create a document before saving.";
     return;
   }
@@ -1104,17 +1189,42 @@ async function saveFile() {
   }
   try {
     let document = currentDocument.value;
-    if (subjectDirty.value || tagsDirty.value) {
+    const baseHeads = document.heads ? [...document.heads] : [];
+    if (subjectDirty.value || tagsDirty.value || isWordDocument.value) {
       document = await currentDatabase.value.documents.update(document.id, {
         set: {
           subject: subject.value,
           tags: tags.value,
+          type: currentDocumentType.value,
         },
       });
       currentDocument.value = document;
     }
 
-    const result = textBuffer.value.dirty
+    if (isWordDocument.value) {
+      if (currentWordDocument.value && isDirty.value) {
+        document = await currentDatabase.value.documents.update(document.id, {
+          set: {
+            comments: commentsFromWordDocument(currentWordDocument.value),
+          },
+          richText: [{
+            path: ["body"],
+            baseHeads,
+            spans: documentToRichTextSpans(currentWordDocument.value),
+          }],
+        });
+        currentDocument.value = document;
+      }
+      savedSubject.value = readSubject(document);
+      subject.value = savedSubject.value;
+      savedTags.value = readTags(document);
+      tags.value = [...savedTags.value];
+      isDirty.value = false;
+      status.value = "Saved Word document.";
+      return;
+    }
+
+    const result = textBuffer.value?.dirty
       ? await textBuffer.value.flush()
       : { document, value: markdown.value, reconciled: false };
     currentDocument.value = result.document;
@@ -1265,7 +1375,7 @@ function handleAttachmentPickerCancel() {
  * The buffer stores the document heads from the snapshot so later saves can be
  * merged correctly with concurrent changes.
  */
-function loadDocumentIntoEditor(
+async function loadDocumentIntoEditor(
   database: MindooDBAppDatabase,
   databaseId: string,
   document: MindooDBAppDocument,
@@ -1274,18 +1384,47 @@ function loadDocumentIntoEditor(
   currentDatabase.value = database;
   currentDatabaseId.value = databaseId;
   currentDocument.value = document;
+  currentDocumentType.value = readDocumentType(document);
+  currentWordDocument.value = null;
   viewingHistoricalSnapshot.value = null;
-  textBuffer.value = createMindooDBTextBuffer({
-    database,
-    document,
-    path: ["body"],
-  });
+  textBuffer.value = currentDocumentType.value === "markdown"
+    ? createMindooDBTextBuffer({
+        database,
+        document,
+        path: ["body"],
+      })
+    : null;
   subject.value = readSubject(document);
   savedSubject.value = subject.value;
   tags.value = readTags(document);
   savedTags.value = [...tags.value];
   suppressEditorUpdate = true;
-  markdown.value = textBuffer.value.value;
+  markdown.value = textBuffer.value?.value ?? "";
+  wordEditorDocument.value = null;
+  if (currentDocumentType.value === "word") {
+    const fallbackDocument = plainTextToWordDocument(document.data.body);
+    try {
+      const snapshot = await database.documents.getRichText(document.id, ["body"]);
+      console.log("[Word load] Rich-text snapshot", {
+        docId: document.id,
+        heads: snapshot.heads,
+        documentComments: Array.isArray(document.data.comments)
+          ? document.data.comments.length
+          : null,
+        ...summarizeRichTextSpans(snapshot.spans),
+      });
+      wordEditorDocument.value = snapshot.spans.length
+        ? richTextSpansToDocument(snapshot.spans, document.data.comments)
+        : fallbackDocument;
+      console.log("[Word load] Editor document model", {
+        docId: document.id,
+        ...summarizeWordDocument(wordEditorDocument.value),
+      });
+    } catch (error) {
+      console.warn("Could not load Word rich-text snapshot; falling back to materialized text.", error);
+      wordEditorDocument.value = fallbackDocument;
+    }
+  }
   isDirty.value = false;
   queueMicrotask(() => {
     suppressEditorUpdate = false;
@@ -1309,9 +1448,58 @@ function onEditorUpdate(value: string) {
   }
 }
 
+function onWordEditorChange(document: DocxDocument) {
+  if (editorReadOnly.value) {
+    return;
+  }
+  currentWordDocument.value = document;
+  if (!suppressEditorUpdate) {
+    isDirty.value = true;
+  }
+}
+
+async function onWordDocxImport(file: File, document: DocxDocument) {
+  if (!currentDatabase.value || !currentDocument.value) {
+    status.value = "Open or create a Word document before importing DOCX.";
+    return;
+  }
+  if (!canManageAttachments.value) {
+    status.value = "This document database does not allow attachment updates.";
+    return;
+  }
+  const attachmentName = "source.docx";
+  try {
+    await uploadFileAttachment(
+      currentDatabase.value,
+      currentDocument.value.id,
+      attachmentName,
+      file,
+    );
+    const updated = await currentDatabase.value.documents.update(
+      currentDocument.value.id,
+      {
+        set: {
+          type: "word",
+          docxAttachment: attachmentName,
+        },
+      },
+    );
+    currentDocument.value = updated;
+    currentWordDocument.value = document;
+    isDirty.value = true;
+    status.value = `Imported ${file.name}.`;
+  } catch (error) {
+    status.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
 function readSubject(document: MindooDBAppDocument) {
   const value = document.data.subject;
   return typeof value === "string" ? value : "";
+}
+
+function readDocumentType(document: MindooDBAppDocument): DocumentType {
+  return document.data.type === "word" ? "word" : "markdown";
 }
 
 function readTags(document: MindooDBAppDocument) {
@@ -1437,7 +1625,7 @@ function formatRevisionDate(timestamp: number) {
       <template v-if="currentDocument">
         <section class="document-area">
           <Splitter
-            v-if="showPreviewPane"
+            v-if="isMarkdownDocument && showPreviewPane"
             :layout="splitterLayout"
             class="editor-preview-splitter"
           >
@@ -1500,7 +1688,7 @@ function formatRevisionDate(timestamp: number) {
           </Splitter>
 
           <section
-            v-else
+            v-else-if="isMarkdownDocument"
             class="editor-panel glass-card"
             :class="{ 'editor-panel--history': editorReadOnly }"
           >
@@ -1533,6 +1721,39 @@ function formatRevisionDate(timestamp: number) {
               @update:model-value="onEditorUpdate"
             />
           </section>
+          <section
+            v-else
+            class="editor-panel glass-card"
+            :class="{ 'editor-panel--history': editorReadOnly }"
+          >
+            <div v-if="isTimeTravelActive" class="history-banner">
+              <i class="pi pi-clock" aria-hidden="true" />
+              <span
+                >Time travel mode is active as of {{ timeTravelDateLabel }} -
+                read-only.</span
+              >
+            </div>
+            <div v-if="isViewingHistorical" class="history-banner">
+              <i class="pi pi-history" aria-hidden="true" />
+              <span
+                >You're viewing the version from
+                {{
+                  formatRevisionDate(viewingHistoricalSnapshot?.timestamp ?? 0)
+                }}
+                - read-only.</span
+              >
+              <button type="button" @click="returnToCurrent">
+                Return to current
+              </button>
+            </div>
+            <WordDocumentEditor
+              :initial-document="wordEditorDocument"
+              :readonly="editorReadOnly"
+              :title="subject"
+              @change="onWordEditorChange"
+              @import="onWordDocxImport"
+            />
+          </section>
         </section>
 
         <DocumentAttachmentsPanel
@@ -1552,18 +1773,24 @@ function formatRevisionDate(timestamp: number) {
         />
       </template>
       <section v-else class="empty-state">
-        <h1>Collaborative markdown documents</h1>
+        <h1>Collaborative text documents</h1>
         <p>
-          Create a new markdown document or open an existing one. Write with
-          rich formatting, attach images and files, and edit alongside your
-          teammates with real-time updates.
+          Create markdown notes or Word documents. Markdown uses the existing
+          text patch flow; Word documents use the rich-text bridge exposed by
+          Haven through the app SDK.
         </p>
         <div class="empty-state__actions">
           <Button
-            label="New document"
+            label="New markdown document"
             icon="pi pi-file-plus"
             :disabled="!canCreate"
-            @click="newFile"
+            @click="newMarkdownFile"
+          />
+          <Button
+            label="New Word document"
+            icon="pi pi-file-word"
+            :disabled="!canCreate"
+            @click="newWordFile"
           />
           <Button
             label="Open document"
@@ -1579,7 +1806,7 @@ function formatRevisionDate(timestamp: number) {
     <Dialog
       v-model:visible="openDialogVisible"
       modal
-      header="Open Markdown Document"
+      header="Open Document"
       :style="{ width: '58rem', maxWidth: '96vw' }"
       @hide="disposeOpenNavigator"
     >
@@ -1598,6 +1825,18 @@ function formatRevisionDate(timestamp: number) {
             >
               {{ database.title || database.id }}
             </option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">Document type</span>
+          <select
+            v-model="selectedOpenType"
+            class="native-input"
+            @change="handleOpenTypeChange"
+          >
+            <option value="all">All documents</option>
+            <option value="markdown">Markdown documents</option>
+            <option value="word">Word documents</option>
           </select>
         </label>
         <div class="open-dialog__browser">
@@ -1621,7 +1860,7 @@ function formatRevisionDate(timestamp: number) {
               @dblclick="openSelectedDocument"
             >
               <strong>{{ document.title }}</strong>
-              <small>{{ document.detail }}</small>
+              <small>{{ document.type === "word" ? "Word" : "Markdown" }} · {{ document.detail }}</small>
               <small>{{ document.id }}</small>
             </button>
             <p

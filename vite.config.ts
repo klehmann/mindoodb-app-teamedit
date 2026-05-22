@@ -7,6 +7,7 @@ import wasm from "vite-plugin-wasm";
 function createResolveAliases() {
   const aliases: Record<string, string> = {
     "@": fileURLToPath(new URL("./src", import.meta.url)),
+    stream: fileURLToPath(new URL("./node_modules/stream-browserify", import.meta.url)),
   };
 
   if (process.env.LOCAL_MINDOODB === "1") {
