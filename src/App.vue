@@ -94,6 +94,24 @@ type PreviewPanePosition = "right" | "bottom";
 type DocumentType = "markdown" | "word";
 type OpenDocumentTypeFilter = "all" | DocumentType;
 
+interface OpenDocumentSession {
+  id: string;
+  databaseId: string;
+  database: MindooDBAppDatabase;
+  documentId: string;
+  document: MindooDBAppDocument;
+  type: DocumentType;
+  textBuffer: MindooDBTextBuffer | null;
+  markdown: string;
+  wordEditorDocument: DocxDocument | null;
+  currentWordDocument: DocxDocument | null;
+  subject: string;
+  savedSubject: string;
+  tags: string[];
+  savedTags: string[];
+  isDirty: boolean;
+}
+
 function readPreviewPaneSettings() {
   if (typeof localStorage === "undefined") {
     return {
@@ -131,7 +149,8 @@ const { updateAvailable, updateReloading, reloadForUpdate } =
   useTeamEditAppUpdate();
 
 // Bridge/session state is kept in this root component because TeamEdit is a
-// small sample app with one active document at a time.
+// small sample app. Open document sessions keep multiple files available while
+// one editor surface is active, matching TeamGrid's Window menu model.
 const session = ref<MindooDBAppSession | null>(null);
 const currentUserName = ref("User");
 const launchTimeTravelDate = ref<number | null>(null);
@@ -160,19 +179,22 @@ const hostUiPreferences = ref<MindooDBAppUiPreferences>({
 
 // The editor always works with a local markdown string. The text buffer mirrors
 // that string, records local edits, and flushes granular text patches on save.
-const textBuffer = ref<MindooDBTextBuffer | null>(null);
+const textBuffer = shallowRef<MindooDBTextBuffer | null>(null);
 const markdown = ref("");
 const subject = ref("");
 const savedSubject = ref("");
 const tags = ref<string[]>([]);
 const savedTags = ref<string[]>([]);
 const isDirty = ref(false);
+const openDocumentSessions = shallowRef<OpenDocumentSession[]>([]);
+const activeDocumentSessionId = ref("");
 const status = ref("Connecting to Haven...");
 const openDialogVisible = ref(false);
 const propertiesDialogVisible = ref(false);
 const refreshConfirmVisible = ref(false);
 const infoDialogVisible = ref(false);
 const deleteConfirmVisible = ref(false);
+const closeConfirmVisible = ref(false);
 const attachmentPickerVisible = ref(false);
 const revisionDialogVisible = ref(false);
 const revisionEntries = ref<MindooDBAppDocumentHistoryEntry[]>([]);
@@ -201,6 +223,7 @@ const openNavigator = ref<MindooDBAppViewNavigator | null>(null);
 const copiedInfoLabel = ref<string | null>(null);
 const propertiesTitleDraft = ref("");
 const propertiesTagsDraft = ref("");
+const pendingCloseSessionId = ref("");
 let cleanupTheme: (() => void) | null = null;
 let cleanupUiPreferences: (() => void) | null = null;
 let previewRenderGeneration = 0;
@@ -274,6 +297,20 @@ const tagsDirty = computed(
 );
 const hasLocalEdits = computed(
   () => isDirty.value || subjectDirty.value || tagsDirty.value,
+);
+const openSessions = computed(() =>
+  openDocumentSessions.value.map((session) => ({
+    id: session.id,
+    documentId: session.documentId,
+    databaseId: session.databaseId,
+    title: session.subject.trim() || "Untitled document",
+    type: session.type,
+    isActive: session.id === activeDocumentSessionId.value,
+    isDirty:
+      session.id === activeDocumentSessionId.value
+        ? hasLocalEdits.value
+        : sessionHasLocalEdits(session),
+  })),
 );
 const isMarkdownDocument = computed(() => currentDocumentType.value === "markdown");
 const isWordDocument = computed(() => currentDocumentType.value === "word");
@@ -353,6 +390,15 @@ const splitterLayout = computed(() =>
 const documentTitle = computed(
   () => subject.value.trim() || "Untitled document",
 );
+const pendingCloseSession = computed(
+  () =>
+    openDocumentSessions.value.find(
+      (session) => session.id === pendingCloseSessionId.value,
+    ) ?? null,
+);
+const pendingCloseSessionTitle = computed(
+  () => pendingCloseSession.value?.subject.trim() || "Untitled document",
+);
 const currentDatabaseLabel = computed(() => {
   const info = databases.value.find(
     (database) => database.id === currentDatabaseId.value,
@@ -388,6 +434,7 @@ const {
   revisionId: activeRevisionId,
   onDocumentRefresh(document) {
     currentDocument.value = document;
+    snapshotActiveSession();
   },
   setStatus(message) {
     status.value = message;
@@ -546,6 +593,29 @@ const menuItems = computed<MenuItem[]>(() => [
             },
           },
         ],
+      },
+    ],
+  },
+  {
+    label: "Window",
+    icon: "pi pi-window-maximize",
+    items: [
+      ...openSessions.value.map((session) => ({
+        label: `${session.isActive ? "\u2713 " : ""}${session.title}${session.isDirty ? " *" : ""}`,
+        icon: session.isActive
+          ? "pi pi-check"
+          : session.type === "word"
+            ? "pi pi-file-word"
+            : "pi pi-file",
+        disabled: session.isActive,
+        command: () => switchToOpenSession(session.id),
+      })),
+      ...(openSessions.value.length > 0 ? [{ separator: true } satisfies MenuItem] : []),
+      {
+        label: "Close current document",
+        icon: "pi pi-times",
+        disabled: !currentDocument.value,
+        command: () => closeOpenSession(activeDocumentSessionId.value),
       },
     ],
   },
@@ -786,12 +856,159 @@ function applyDocumentProperties() {
   subject.value = propertiesTitleDraft.value.trim();
   // Tags are newline-edited for now so users can paste category paths quickly.
   tags.value = normalizeTags(propertiesTagsDraft.value.split(/\r?\n/));
+  snapshotActiveSession();
   propertiesDialogVisible.value = false;
 }
 
 function resetPropertiesDraft() {
   propertiesTitleDraft.value = subject.value;
   propertiesTagsDraft.value = tags.value.join("\n");
+}
+
+function createSessionId(databaseId: string, documentId: string) {
+  return `${databaseId}:${documentId}`;
+}
+
+function tagsEqual(left: string[], right: string[]) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function sessionHasLocalEdits(session: OpenDocumentSession) {
+  return (
+    session.isDirty ||
+    session.subject !== session.savedSubject ||
+    !tagsEqual(session.tags, session.savedTags)
+  );
+}
+
+function snapshotActiveSession() {
+  if (viewingHistoricalSnapshot.value) {
+    return;
+  }
+  const session = openDocumentSessions.value.find(
+    (candidate) => candidate.id === activeDocumentSessionId.value,
+  );
+  if (!session || !currentDocument.value) {
+    return;
+  }
+  if (currentDatabase.value) {
+    session.database = currentDatabase.value;
+  }
+  session.databaseId = currentDatabaseId.value;
+  session.document = currentDocument.value;
+  session.documentId = currentDocument.value.id;
+  session.type = currentDocumentType.value;
+  session.textBuffer = textBuffer.value;
+  session.markdown = markdown.value;
+  session.wordEditorDocument = wordEditorDocument.value;
+  session.currentWordDocument = currentWordDocument.value;
+  session.subject = subject.value;
+  session.savedSubject = savedSubject.value;
+  session.tags = [...tags.value];
+  session.savedTags = [...savedTags.value];
+  session.isDirty = isDirty.value;
+  openDocumentSessions.value = [...openDocumentSessions.value];
+}
+
+function activateSession(session: OpenDocumentSession) {
+  activeDocumentSessionId.value = session.id;
+  currentDatabase.value = session.database;
+  currentDatabaseId.value = session.databaseId;
+  currentDocument.value = session.document;
+  currentDocumentType.value = session.type;
+  viewingHistoricalSnapshot.value = null;
+  textBuffer.value = session.textBuffer;
+  subject.value = session.subject;
+  savedSubject.value = session.savedSubject;
+  tags.value = [...session.tags];
+  savedTags.value = [...session.savedTags];
+  suppressEditorUpdate = true;
+  markdown.value = session.markdown;
+  wordEditorDocument.value = session.wordEditorDocument;
+  currentWordDocument.value = session.currentWordDocument;
+  isDirty.value = session.isDirty;
+  imageResolver.clear();
+  queueMicrotask(() => {
+    suppressEditorUpdate = false;
+  });
+}
+
+function clearActiveDocumentState() {
+  activeDocumentSessionId.value = "";
+  currentDatabase.value = null;
+  currentDatabaseId.value = "";
+  currentDocument.value = null;
+  currentDocumentType.value = "markdown";
+  viewingHistoricalSnapshot.value = null;
+  textBuffer.value = null;
+  markdown.value = "";
+  wordEditorDocument.value = null;
+  currentWordDocument.value = null;
+  subject.value = "";
+  savedSubject.value = "";
+  tags.value = [];
+  savedTags.value = [];
+  isDirty.value = false;
+  imageResolver.clear();
+}
+
+function switchToOpenSession(sessionId: string) {
+  snapshotActiveSession();
+  const session = openDocumentSessions.value.find(
+    (candidate) => candidate.id === sessionId,
+  );
+  if (!session) {
+    status.value = "That document window is no longer open.";
+    return;
+  }
+  activateSession(session);
+  status.value = `Switched to ${session.subject.trim() || session.documentId}.`;
+}
+
+function closeOpenSession(sessionId: string) {
+  if (!sessionId) {
+    return;
+  }
+  snapshotActiveSession();
+  const session = openDocumentSessions.value.find(
+    (candidate) => candidate.id === sessionId,
+  );
+  if (!session) {
+    return;
+  }
+  if (sessionHasLocalEdits(session)) {
+    pendingCloseSessionId.value = sessionId;
+    closeConfirmVisible.value = true;
+    return;
+  }
+  removeOpenSession(sessionId);
+}
+
+function confirmCloseOpenSession() {
+  const sessionId = pendingCloseSessionId.value;
+  closeConfirmVisible.value = false;
+  pendingCloseSessionId.value = "";
+  if (sessionId) {
+    removeOpenSession(sessionId);
+  }
+}
+
+function removeOpenSession(sessionId: string) {
+  const wasActive = activeDocumentSessionId.value === sessionId;
+  openDocumentSessions.value = openDocumentSessions.value.filter(
+    (candidate) => candidate.id !== sessionId,
+  );
+  if (!wasActive) {
+    status.value = "Closed document window.";
+    return;
+  }
+  const nextSession = openDocumentSessions.value[0] ?? null;
+  if (nextSession) {
+    activateSession(nextSession);
+  } else {
+    clearActiveDocumentState();
+  }
+  status.value = "Closed document window.";
 }
 
 /** Create a new empty markdown document. */
@@ -1053,6 +1270,7 @@ async function returnToCurrent() {
   queueMicrotask(() => {
     suppressEditorUpdate = false;
   });
+  snapshotActiveSession();
   status.value = "Returned to the current version.";
 }
 
@@ -1420,6 +1638,7 @@ async function saveFile() {
       savedTags.value = readTags(document);
       tags.value = [...savedTags.value];
       isDirty.value = false;
+      snapshotActiveSession();
       status.value = "Saved Word document.";
       return;
     }
@@ -1443,6 +1662,7 @@ async function saveFile() {
       status.value = "Saved.";
     }
     isDirty.value = false;
+    snapshotActiveSession();
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
   }
@@ -1466,17 +1686,19 @@ async function deleteCurrentDocument() {
   }
   try {
     const deletedDocumentId = currentDocument.value.id;
+    const deletedSessionId = activeDocumentSessionId.value;
     await currentDatabase.value.documents.delete(deletedDocumentId);
     deleteConfirmVisible.value = false;
-    currentDocument.value = null;
-    textBuffer.value = null;
+    openDocumentSessions.value = openDocumentSessions.value.filter(
+      (session) => session.id !== deletedSessionId,
+    );
     imageResolver.clear();
-    markdown.value = "";
-    subject.value = "";
-    savedSubject.value = "";
-    tags.value = [];
-    savedTags.value = [];
-    isDirty.value = false;
+    const nextSession = openDocumentSessions.value[0] ?? null;
+    if (nextSession) {
+      activateSession(nextSession);
+    } else {
+      clearActiveDocumentState();
+    }
     status.value = `Deleted ${deletedDocumentId}.`;
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
@@ -1509,6 +1731,7 @@ async function uploadEditorImage(file: File) {
   );
   if (refreshed) {
     currentDocument.value = refreshed;
+    snapshotActiveSession();
   }
   const markdownUrl = createAttachmentMarkdownUrl(attachmentName);
   void imageResolver.resolveImageUrl(markdownUrl);
@@ -1569,39 +1792,30 @@ function handleAttachmentPickerCancel() {
 }
 
 /**
- * Replace the active editor state with a document snapshot.
+ * Create a clean in-memory window session from a Haven document snapshot.
  *
- * This creates a new `MindooDBTextBuffer` bound to the document's `body` path.
- * The buffer stores the document heads from the snapshot so later saves can be
- * merged correctly with concurrent changes.
+ * Markdown sessions keep a text buffer so pending text patches survive window
+ * switches. Word sessions keep the editor model that will be restored on
+ * activation.
  */
-async function loadDocumentIntoEditor(
+async function createDocumentSession(
   database: MindooDBAppDatabase,
   databaseId: string,
   document: MindooDBAppDocument,
-) {
-  imageResolver.clear();
-  currentDatabase.value = database;
-  currentDatabaseId.value = databaseId;
-  currentDocument.value = document;
-  currentDocumentType.value = readDocumentType(document);
-  currentWordDocument.value = null;
-  viewingHistoricalSnapshot.value = null;
-  textBuffer.value = currentDocumentType.value === "markdown"
+): Promise<OpenDocumentSession> {
+  const type = readDocumentType(document);
+  const sessionSubject = readSubject(document);
+  const sessionTags = readTags(document);
+  const sessionTextBuffer = type === "markdown"
     ? createMindooDBTextBuffer({
         database,
         document,
         path: ["body"],
       })
     : null;
-  subject.value = readSubject(document);
-  savedSubject.value = subject.value;
-  tags.value = readTags(document);
-  savedTags.value = [...tags.value];
-  suppressEditorUpdate = true;
-  markdown.value = textBuffer.value?.value ?? "";
-  wordEditorDocument.value = null;
-  if (currentDocumentType.value === "word") {
+  let sessionWordDocument: DocxDocument | null = null;
+
+  if (type === "word") {
     const fallbackDocument = plainTextToWordDocument(document.data.body);
     try {
       const snapshot = await database.documents.getRichText(document.id, ["body"]);
@@ -1613,22 +1827,59 @@ async function loadDocumentIntoEditor(
           : null,
         ...summarizeRichTextSpans(snapshot.spans),
       });
-      wordEditorDocument.value = snapshot.spans.length
+      sessionWordDocument = snapshot.spans.length
         ? richTextSpansToDocument(snapshot.spans, document.data.comments)
         : fallbackDocument;
       console.log("[Word load] Editor document model", {
         docId: document.id,
-        ...summarizeWordDocument(wordEditorDocument.value),
+        ...summarizeWordDocument(sessionWordDocument),
       });
     } catch (error) {
       console.warn("Could not load Word rich-text snapshot; falling back to materialized text.", error);
-      wordEditorDocument.value = fallbackDocument;
+      sessionWordDocument = fallbackDocument;
     }
   }
-  isDirty.value = false;
-  queueMicrotask(() => {
-    suppressEditorUpdate = false;
-  });
+
+  return {
+    id: createSessionId(databaseId, document.id),
+    databaseId,
+    database,
+    documentId: document.id,
+    document,
+    type,
+    textBuffer: sessionTextBuffer,
+    markdown: sessionTextBuffer?.value ?? "",
+    wordEditorDocument: sessionWordDocument,
+    currentWordDocument: sessionWordDocument,
+    subject: sessionSubject,
+    savedSubject: sessionSubject,
+    tags: sessionTags,
+    savedTags: [...sessionTags],
+    isDirty: false,
+  };
+}
+
+/**
+ * Register a document as an open TeamEdit window and make it active.
+ */
+async function loadDocumentIntoEditor(
+  database: MindooDBAppDatabase,
+  databaseId: string,
+  document: MindooDBAppDocument,
+) {
+  snapshotActiveSession();
+  const nextSession = await createDocumentSession(database, databaseId, document);
+  const existingIndex = openDocumentSessions.value.findIndex(
+    (candidate) => candidate.id === nextSession.id,
+  );
+  if (existingIndex >= 0) {
+    openDocumentSessions.value = openDocumentSessions.value.map((candidate) =>
+      candidate.id === nextSession.id ? nextSession : candidate,
+    );
+  } else {
+    openDocumentSessions.value = [...openDocumentSessions.value, nextSession];
+  }
+  activateSession(nextSession);
 }
 
 /**
@@ -1645,6 +1896,7 @@ function onEditorUpdate(value: string) {
   if (!suppressEditorUpdate) {
     textBuffer.value?.replaceText(value);
     isDirty.value = textBuffer.value?.dirty ?? false;
+    snapshotActiveSession();
   }
 }
 
@@ -1655,6 +1907,7 @@ function onWordEditorChange(document: DocxDocument) {
   currentWordDocument.value = document;
   if (!suppressEditorUpdate) {
     isDirty.value = true;
+    snapshotActiveSession();
   }
 }
 
@@ -1841,6 +2094,7 @@ function formatRevisionDate(timestamp: number) {
                   </button>
                 </div>
                 <MilkdownMarkdownEditor
+                  :key="activeDocumentSessionId"
                   :model-value="markdown"
                   :on-image-upload="uploadEditorImage"
                   :resolve-image-url="imageResolver.resolveImageUrl"
@@ -1893,6 +2147,7 @@ function formatRevisionDate(timestamp: number) {
               </button>
             </div>
             <MilkdownMarkdownEditor
+              :key="activeDocumentSessionId"
               :model-value="markdown"
               :on-image-upload="uploadEditorImage"
               :resolve-image-url="imageResolver.resolveImageUrl"
@@ -1927,6 +2182,7 @@ function formatRevisionDate(timestamp: number) {
               </button>
             </div>
             <WordDocumentEditor
+              :key="activeDocumentSessionId"
               ref="wordEditorRef"
               :author="currentUserName"
               :initial-document="wordEditorDocument"
@@ -2161,6 +2417,28 @@ function formatRevisionDate(timestamp: number) {
     </Dialog>
 
     <Dialog
+      v-model:visible="closeConfirmVisible"
+      modal
+      header="Discard unsaved changes?"
+      :style="{ width: '28rem', maxWidth: '96vw' }"
+      @hide="pendingCloseSessionId = ''"
+    >
+      <p>
+        Close <strong>{{ pendingCloseSessionTitle }}</strong> and discard its
+        unsaved changes in this TeamEdit window?
+      </p>
+      <template #footer>
+        <Button label="Cancel" text @click="closeConfirmVisible = false" />
+        <Button
+          label="Discard and close"
+          icon="pi pi-times"
+          severity="warn"
+          @click="confirmCloseOpenSession"
+        />
+      </template>
+    </Dialog>
+
+    <Dialog
       v-model:visible="infoDialogVisible"
       modal
       header="Document info"
@@ -2321,10 +2599,8 @@ function formatRevisionDate(timestamp: number) {
 }
 
 .toolbar__document-title {
-  position: absolute;
-  left: 50%;
+  flex: 0 1 min(32rem, 36vw);
   max-width: min(32rem, 36vw);
-  transform: translateX(-50%);
   padding: 0.22rem 0.75rem;
   border: 1px solid transparent;
   border-radius: 999px;
@@ -2333,6 +2609,7 @@ function formatRevisionDate(timestamp: number) {
   cursor: pointer;
   font-weight: 700;
   overflow: hidden;
+  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2417,9 +2694,7 @@ button.toolbar__status-badge:focus-visible {
   }
 
   .toolbar__document-title {
-    position: static;
     max-width: 14rem;
-    transform: none;
   }
 }
 
