@@ -1,9 +1,28 @@
 import { describe, expect, it } from "vitest";
 import type { MindooDBAppViewEntry } from "mindoodb-app-sdk";
 
-import { mapDocumentEntries } from "@/lib/viewOpen";
+import { createOpenViewDefinition, mapDocumentEntries } from "@/lib/viewOpen";
 
 describe("viewOpen", () => {
+  it("defaults File/Open to non-template documents", () => {
+    expect(createOpenViewDefinition()).toMatchObject({
+      id: "teamedit-open-tags-noTemplates-v1",
+      filter: {
+        mode: "expression",
+      },
+    });
+  });
+
+  it("creates separate template-filtered view definitions", () => {
+    expect(createOpenViewDefinition("all").filter).toBeUndefined();
+    expect(createOpenViewDefinition("onlyTemplates")).toMatchObject({
+      id: "teamedit-open-tags-onlyTemplates-v1",
+      filter: {
+        mode: "expression",
+      },
+    });
+  });
+
   it("maps document type discriminators for markdown and Word documents", () => {
     const entries: MindooDBAppViewEntry[] = [
       createDocumentEntry("markdown-doc", "Markdown", "markdown"),

@@ -36,14 +36,22 @@ const importInputRef = shallowRef<HTMLInputElement | null>(null);
 const documentModel = shallowRef<DocxDocument>(createDefaultWordDocument());
 const importError = shallowRef("");
 const editorInstanceKey = shallowRef(0);
+const isHydrating = shallowRef(false);
+let hydrationGeneration = 0;
 
 watch(
   () => props.initialDocument,
   async (document) => {
-    const nextDocument = document ?? createDefaultWordDocument();
+    const generation = ++hydrationGeneration;
+    isHydrating.value = true;
+    const nextDocument = cloneWordDocument(document ?? createDefaultWordDocument());
     attachCommentsToDocument(nextDocument, commentsFromWordDocument(nextDocument));
     documentModel.value = nextDocument;
     editorInstanceKey.value += 1;
+    await nextTick();
+    // If the embedded editor does not emit `ready`, do not keep the component
+    // permanently hydrating. Normal ready-driven hydration usually wins first.
+    window.setTimeout(() => completeHydration(generation), 250);
   },
   { immediate: true },
 );
@@ -79,6 +87,10 @@ async function handleChange(document: unknown) {
   const nextDocument = readCurrentEditorDocument(document);
   applyCommentAuthor(nextDocument);
   console.log("[Word editor] change", summarizeWordDocument(nextDocument));
+  if (isHydrating.value) {
+    documentModel.value = nextDocument;
+    return;
+  }
   emit("change", nextDocument);
 }
 
@@ -91,6 +103,10 @@ async function handleUpdateDocument(document: unknown) {
   const nextDocument = readCurrentEditorDocument(document);
   applyCommentAuthor(nextDocument);
   console.log("[Word editor] update:document", summarizeWordDocument(nextDocument));
+  if (isHydrating.value) {
+    documentModel.value = nextDocument;
+    return;
+  }
   emit("change", nextDocument);
 }
 
@@ -98,11 +114,23 @@ async function handleReady() {
   await nextTick();
   const document = editorRef.value?.getDocument?.() as DocxDocument | null | undefined;
   console.log("[Word editor] ready", document ? summarizeWordDocument(document) : { document: null });
+  await nextTick();
+  window.setTimeout(() => completeHydration(hydrationGeneration), 0);
 }
 
 function readCurrentEditorDocument(fallback: unknown) {
   return (editorRef.value?.getDocument?.() as DocxDocument | null | undefined)
     ?? (fallback as DocxDocument);
+}
+
+function completeHydration(generation: number) {
+  if (generation === hydrationGeneration) {
+    isHydrating.value = false;
+  }
+}
+
+function cloneWordDocument(document: DocxDocument) {
+  return structuredClone(document) as DocxDocument;
 }
 
 // The Vue DOCX editor currently creates UI comments with the hard-coded

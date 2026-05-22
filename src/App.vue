@@ -77,6 +77,7 @@ import {
   mapDocumentEntries,
   type OpenCategoryNode,
   type OpenDocumentRow,
+  type OpenDocumentTemplateFilter,
 } from "@/lib/viewOpen";
 import {
   attachCommentsToDocument,
@@ -93,6 +94,7 @@ const PREVIEW_PANE_SETTINGS_KEY = "mindoodb-teamedit-preview-pane";
 type PreviewPanePosition = "right" | "bottom";
 type DocumentType = "markdown" | "word";
 type OpenDocumentTypeFilter = "all" | DocumentType;
+type OpenDialogMode = "open" | "template";
 
 interface OpenDocumentSession {
   id: string;
@@ -109,6 +111,8 @@ interface OpenDocumentSession {
   savedSubject: string;
   tags: string[];
   savedTags: string[];
+  isTemplate: boolean;
+  savedIsTemplate: boolean;
   isDirty: boolean;
 }
 
@@ -185,6 +189,8 @@ const subject = ref("");
 const savedSubject = ref("");
 const tags = ref<string[]>([]);
 const savedTags = ref<string[]>([]);
+const isTemplate = ref(false);
+const savedIsTemplate = ref(false);
 const isDirty = ref(false);
 const openDocumentSessions = shallowRef<OpenDocumentSession[]>([]);
 const activeDocumentSessionId = ref("");
@@ -215,6 +221,8 @@ const previewPanePosition = ref<PreviewPanePosition>(
 const previewRoot = ref<HTMLElement | null>(null);
 const selectedOpenDocId = ref("");
 const selectedOpenType = ref<OpenDocumentTypeFilter>("all");
+const selectedOpenTemplateFilter = ref<OpenDocumentTemplateFilter>("noTemplates");
+const openDialogMode = ref<OpenDialogMode>("open");
 const selectedOpenCategoryKey = ref(ALL_DOCUMENTS_NODE_KEY);
 const openCategoryNodes = ref<OpenCategoryNode[]>([]);
 const openDialogDocuments = ref<OpenDocumentRow[]>([]);
@@ -223,6 +231,7 @@ const openNavigator = ref<MindooDBAppViewNavigator | null>(null);
 const copiedInfoLabel = ref<string | null>(null);
 const propertiesTitleDraft = ref("");
 const propertiesTagsDraft = ref("");
+const propertiesIsTemplateDraft = ref(false);
 const pendingCloseSessionId = ref("");
 let cleanupTheme: (() => void) | null = null;
 let cleanupUiPreferences: (() => void) | null = null;
@@ -295,8 +304,9 @@ const subjectDirty = computed(() => subject.value !== savedSubject.value);
 const tagsDirty = computed(
   () => JSON.stringify(tags.value) !== JSON.stringify(savedTags.value),
 );
+const templateDirty = computed(() => isTemplate.value !== savedIsTemplate.value);
 const hasLocalEdits = computed(
-  () => isDirty.value || subjectDirty.value || tagsDirty.value,
+  () => isDirty.value || subjectDirty.value || tagsDirty.value || templateDirty.value,
 );
 const openSessions = computed(() =>
   openDocumentSessions.value.map((session) => ({
@@ -469,6 +479,14 @@ const menuItems = computed<MenuItem[]>(() => [
         disabled: !canCreate.value,
         command: () => {
           void newWordFile();
+        },
+      },
+      {
+        label: "New from template...",
+        icon: "pi pi-copy",
+        disabled: !canCreate.value || readableDatabases.value.length === 0,
+        command: () => {
+          void openTemplateDialog();
         },
       },
       {
@@ -748,6 +766,21 @@ async function openDatabaseById(databaseId: string) {
 /** Load documents before showing the File/Open picker. */
 async function openFileDialog() {
   try {
+    openDialogMode.value = "open";
+    selectedOpenTemplateFilter.value = "noTemplates";
+    await rebuildOpenNavigator();
+    selectedOpenCategoryKey.value = ALL_DOCUMENTS_NODE_KEY;
+    selectedOpenDocId.value = openDialogDocuments.value[0]?.id ?? "";
+    openDialogVisible.value = true;
+  } catch (error) {
+    status.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function openTemplateDialog() {
+  try {
+    openDialogMode.value = "template";
+    selectedOpenTemplateFilter.value = "onlyTemplates";
     await rebuildOpenNavigator();
     selectedOpenCategoryKey.value = ALL_DOCUMENTS_NODE_KEY;
     selectedOpenDocId.value = openDialogDocuments.value[0]?.id ?? "";
@@ -780,6 +813,17 @@ async function handleOpenTypeChange() {
   await refreshOpenDocumentsForSelectedCategory();
 }
 
+async function handleOpenTemplateFilterChange() {
+  try {
+    if (openDialogMode.value === "template") {
+      selectedOpenTemplateFilter.value = "onlyTemplates";
+    }
+    await rebuildOpenNavigator();
+  } catch (error) {
+    status.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
 async function rebuildOpenNavigator() {
   const databaseInfo = selectedDatabaseInfo.value;
   if (!databaseInfo?.capabilities.includes("views")) {
@@ -793,7 +837,7 @@ async function rebuildOpenNavigator() {
   }
   const navigator = await session.value.createViewNavigator({
     databaseIds: [selectedDatabaseId.value],
-    definition: createOpenViewDefinition(),
+    definition: createOpenViewDefinition(selectedOpenTemplateFilter.value),
     categorizationStyle: "category_then_document",
     options: {
       includeCategories: true,
@@ -856,6 +900,7 @@ function applyDocumentProperties() {
   subject.value = propertiesTitleDraft.value.trim();
   // Tags are newline-edited for now so users can paste category paths quickly.
   tags.value = normalizeTags(propertiesTagsDraft.value.split(/\r?\n/));
+  isTemplate.value = propertiesIsTemplateDraft.value;
   snapshotActiveSession();
   propertiesDialogVisible.value = false;
 }
@@ -863,6 +908,7 @@ function applyDocumentProperties() {
 function resetPropertiesDraft() {
   propertiesTitleDraft.value = subject.value;
   propertiesTagsDraft.value = tags.value.join("\n");
+  propertiesIsTemplateDraft.value = isTemplate.value;
 }
 
 function createSessionId(databaseId: string, documentId: string) {
@@ -877,7 +923,8 @@ function sessionHasLocalEdits(session: OpenDocumentSession) {
   return (
     session.isDirty ||
     session.subject !== session.savedSubject ||
-    !tagsEqual(session.tags, session.savedTags)
+    !tagsEqual(session.tags, session.savedTags) ||
+    session.isTemplate !== session.savedIsTemplate
   );
 }
 
@@ -906,6 +953,8 @@ function snapshotActiveSession() {
   session.savedSubject = savedSubject.value;
   session.tags = [...tags.value];
   session.savedTags = [...savedTags.value];
+  session.isTemplate = isTemplate.value;
+  session.savedIsTemplate = savedIsTemplate.value;
   session.isDirty = isDirty.value;
   openDocumentSessions.value = [...openDocumentSessions.value];
 }
@@ -922,6 +971,8 @@ function activateSession(session: OpenDocumentSession) {
   savedSubject.value = session.savedSubject;
   tags.value = [...session.tags];
   savedTags.value = [...session.savedTags];
+  isTemplate.value = session.isTemplate;
+  savedIsTemplate.value = session.savedIsTemplate;
   suppressEditorUpdate = true;
   markdown.value = session.markdown;
   wordEditorDocument.value = session.wordEditorDocument;
@@ -948,6 +999,8 @@ function clearActiveDocumentState() {
   savedSubject.value = "";
   tags.value = [];
   savedTags.value = [];
+  isTemplate.value = false;
+  savedIsTemplate.value = false;
   isDirty.value = false;
   imageResolver.clear();
 }
@@ -1027,6 +1080,7 @@ async function newMarkdownFile() {
       set: {
         subject: "",
         tags: [],
+        istemplate: false,
         type: "markdown",
         form: "teamedit",
         body: "",
@@ -1060,6 +1114,7 @@ async function newWordFile() {
       set: {
         subject: "",
         tags: [],
+        istemplate: false,
         type: "word",
         form: "teamedit",
         body: "",
@@ -1074,21 +1129,100 @@ async function newWordFile() {
   }
 }
 
+async function createDocumentFromTemplate(
+  templateDatabase: MindooDBAppDatabase,
+  templateDatabaseId: string,
+  templateDocumentId: string,
+) {
+  const templateDocument = await templateDatabase.documents.get(templateDocumentId);
+  if (!templateDocument) {
+    throw new Error("The selected template could not be loaded.");
+  }
+
+  const type = readDocumentType(templateDocument);
+  const needsUpdate = type === "word";
+  const targetDatabaseInfo =
+    selectedDatabaseInfo.value?.capabilities.includes("create") &&
+    (!needsUpdate || selectedDatabaseInfo.value.capabilities.includes("update"))
+      ? selectedDatabaseInfo.value
+      : databases.value.find((database) =>
+          database.capabilities.includes("create") &&
+          (!needsUpdate || database.capabilities.includes("update")),
+        );
+  if (!targetDatabaseInfo) {
+    throw new Error(
+      needsUpdate
+        ? "No writable database is available for creating a Word document from a template."
+        : "No writable database is available for creating from a template.",
+    );
+  }
+
+  selectedDatabaseId.value = targetDatabaseInfo.id;
+  const targetDatabase = targetDatabaseInfo.id === templateDatabaseId
+    ? templateDatabase
+    : await openDatabaseById(targetDatabaseInfo.id);
+  const templateData = cloneDocumentData(templateDocument.data);
+  const created = await targetDatabase.documents.create({
+    set: {
+      ...templateData,
+      subject: `Copy of ${readSubject(templateDocument) || "Untitled document"}`,
+      tags: readTags(templateDocument),
+      istemplate: false,
+      type,
+      form: "teamedit",
+      body: readDocumentBody(templateDocument),
+      ...(type === "word"
+        ? { comments: cloneJsonValue(templateDocument.data.comments) ?? [] }
+        : {}),
+    },
+  });
+
+  let documentToOpen = created;
+  if (type === "word") {
+    const richTextSnapshot = await templateDatabase.documents.getRichText(
+      templateDocument.id,
+      ["body"],
+    );
+    documentToOpen = await targetDatabase.documents.update(created.id, {
+      set: {
+        comments: cloneJsonValue(templateDocument.data.comments) ?? [],
+      },
+      richText: [{
+        path: ["body"],
+        baseHeads: created.heads ? [...created.heads] : [],
+        spans: richTextSnapshot.spans,
+      }],
+    });
+  }
+
+  await loadDocumentIntoEditor(targetDatabase, targetDatabaseInfo.id, documentToOpen);
+  status.value = `Created ${documentToOpen.id} from template.`;
+}
+
 /** Open the selected document and initialize the editor/text buffer. */
 async function openSelectedDocument() {
   try {
     const databaseId = selectedDatabaseId.value;
     const database = await openDatabaseById(databaseId);
-    const document = selectedOpenDocId.value
-      ? await database.documents.get(selectedOpenDocId.value)
-      : null;
-    if (!document) {
-      throw new Error("Select a document to open.");
+    if (!selectedOpenDocId.value) {
+      throw new Error(
+        openDialogMode.value === "template"
+          ? "Select a template to create from."
+          : "Select a document to open.",
+      );
     }
-    await loadDocumentIntoEditor(database, databaseId, document);
+    if (openDialogMode.value === "template") {
+      await createDocumentFromTemplate(database, databaseId, selectedOpenDocId.value);
+    } else {
+      const document = await database.documents.get(selectedOpenDocId.value);
+      if (!document) {
+        throw new Error("Select a document to open.");
+      }
+      await loadDocumentIntoEditor(database, databaseId, document);
+      status.value = `Opened ${document.id}.`;
+    }
     openDialogVisible.value = false;
     await disposeOpenNavigator();
-    status.value = `Opened ${document.id}.`;
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
   }
@@ -1169,6 +1303,8 @@ async function loadHistoricalRevision(
     subject.value = savedSubject.value;
     savedTags.value = readHistoricalTags(snapshot);
     tags.value = [...savedTags.value];
+    savedIsTemplate.value = readHistoricalIsTemplate(snapshot);
+    isTemplate.value = savedIsTemplate.value;
     suppressEditorUpdate = true;
     markdown.value = readHistoricalBody(snapshot);
     wordEditorDocument.value = null;
@@ -1261,6 +1397,8 @@ async function returnToCurrent() {
   subject.value = savedSubject.value;
   savedTags.value = readTags(current);
   tags.value = [...savedTags.value];
+  savedIsTemplate.value = readIsTemplate(current);
+  isTemplate.value = savedIsTemplate.value;
   suppressEditorUpdate = true;
   markdown.value =
     textBuffer.value?.value ?? readDocumentBody(current);
@@ -1434,6 +1572,7 @@ async function importParsedDocxAsNewDocument(file: File, document: DocxDocument)
     set: {
       subject: createImportedDocxTitle(file),
       tags: [],
+      istemplate: false,
       type: "word",
       form: "teamedit",
       body: "",
@@ -1608,11 +1747,12 @@ async function saveFile() {
   try {
     let document = currentDocument.value;
     const baseHeads = document.heads ? [...document.heads] : [];
-    if (subjectDirty.value || tagsDirty.value || isWordDocument.value) {
+    if (subjectDirty.value || tagsDirty.value || templateDirty.value || isWordDocument.value) {
       document = await currentDatabase.value.documents.update(document.id, {
         set: {
           subject: subject.value,
           tags: tags.value,
+          istemplate: isTemplate.value,
           type: currentDocumentType.value,
         },
       });
@@ -1637,6 +1777,8 @@ async function saveFile() {
       subject.value = savedSubject.value;
       savedTags.value = readTags(document);
       tags.value = [...savedTags.value];
+      savedIsTemplate.value = readIsTemplate(document);
+      isTemplate.value = savedIsTemplate.value;
       isDirty.value = false;
       snapshotActiveSession();
       status.value = "Saved Word document.";
@@ -1651,6 +1793,8 @@ async function saveFile() {
     subject.value = savedSubject.value;
     savedTags.value = readTags(result.document);
     tags.value = [...savedTags.value];
+    savedIsTemplate.value = readIsTemplate(result.document);
+    isTemplate.value = savedIsTemplate.value;
     if (result.reconciled) {
       suppressEditorUpdate = true;
       markdown.value = result.value;
@@ -1806,6 +1950,7 @@ async function createDocumentSession(
   const type = readDocumentType(document);
   const sessionSubject = readSubject(document);
   const sessionTags = readTags(document);
+  const sessionIsTemplate = readIsTemplate(document);
   const sessionTextBuffer = type === "markdown"
     ? createMindooDBTextBuffer({
         database,
@@ -1855,6 +2000,8 @@ async function createDocumentSession(
     savedSubject: sessionSubject,
     tags: sessionTags,
     savedTags: [...sessionTags],
+    isTemplate: sessionIsTemplate,
+    savedIsTemplate: sessionIsTemplate,
     isDirty: false,
   };
 }
@@ -1924,6 +2071,10 @@ function readSubject(document: MindooDBAppDocument) {
   return typeof value === "string" ? value : "";
 }
 
+function readIsTemplate(document: MindooDBAppDocument) {
+  return document.data.istemplate === true;
+}
+
 function readDocumentType(document: MindooDBAppDocument): DocumentType {
   return document.data.type === "word" ? "word" : "markdown";
 }
@@ -1935,6 +2086,20 @@ function readTags(document: MindooDBAppDocument) {
 function readDocumentBody(document: MindooDBAppDocument) {
   const value = document.data.body;
   return typeof value === "string" ? value : "";
+}
+
+function cloneDocumentData(data: Record<string, unknown>) {
+  return cloneJsonValue(data) as Record<string, unknown>;
+}
+
+function cloneJsonValue<T>(value: T): T {
+  if (value === undefined) {
+    return value;
+  }
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+  return JSON.parse(JSON.stringify(value)) as T;
 }
 
 function readHistoricalSubject(snapshot: MindooDBAppHistoricalDocument) {
@@ -1949,6 +2114,10 @@ function readHistoricalBody(snapshot: MindooDBAppHistoricalDocument) {
 
 function readHistoricalTags(snapshot: MindooDBAppHistoricalDocument) {
   return readDocumentTags(snapshot.data);
+}
+
+function readHistoricalIsTemplate(snapshot: MindooDBAppHistoricalDocument) {
+  return snapshot.data?.istemplate === true;
 }
 
 function formatRevisionDate(timestamp: number) {
@@ -2237,6 +2406,13 @@ function formatRevisionDate(timestamp: number) {
             :disabled="readableDatabases.length === 0"
             @click="openFileDialog"
           />
+          <Button
+            label="New from template..."
+            icon="pi pi-copy"
+            severity="secondary"
+            :disabled="!canCreate || readableDatabases.length === 0"
+            @click="openTemplateDialog"
+          />
         </div>
       </section>
     </section>
@@ -2244,7 +2420,7 @@ function formatRevisionDate(timestamp: number) {
     <Dialog
       v-model:visible="openDialogVisible"
       modal
-      header="Open Document"
+      :header="openDialogMode === 'template' ? 'New from template' : 'Open Document'"
       :style="{ width: '58rem', maxWidth: '96vw' }"
       @hide="disposeOpenNavigator"
     >
@@ -2277,6 +2453,19 @@ function formatRevisionDate(timestamp: number) {
             <option value="word">Word documents</option>
           </select>
         </label>
+        <label class="field">
+          <span class="field-label">Template type</span>
+          <select
+            v-model="selectedOpenTemplateFilter"
+            class="native-input"
+            :disabled="openDialogMode === 'template'"
+            @change="handleOpenTemplateFilterChange"
+          >
+            <option value="all">All documents</option>
+            <option value="noTemplates">No templates</option>
+            <option value="onlyTemplates">Only templates</option>
+          </select>
+        </label>
         <div class="open-dialog__browser">
           <aside class="open-dialog__tree" aria-label="Document tags">
             <TagTreeList
@@ -2305,7 +2494,11 @@ function formatRevisionDate(timestamp: number) {
               v-if="openDialogDocuments.length === 0"
               class="document-list__empty"
             >
-              No documents in this category.
+              {{
+                openDialogMode === "template"
+                  ? "No template documents in this category."
+                  : "No documents in this category."
+              }}
             </p>
           </div>
         </div>
@@ -2317,7 +2510,7 @@ function formatRevisionDate(timestamp: number) {
           @click="openDialogVisible = false"
         />
         <Button
-          label="Open"
+          :label="openDialogMode === 'template' ? 'Create' : 'Open'"
           :disabled="!selectedOpenDocId"
           @click="openSelectedDocument"
         />
@@ -2354,6 +2547,10 @@ function formatRevisionDate(timestamp: number) {
           Enter one tag per line. Use a backslash to create hierarchy, for
           example <code>Work\Planning</code>.
         </p>
+        <label class="properties-dialog__checkbox">
+          <input v-model="propertiesIsTemplateDraft" type="checkbox" />
+          <span>Use this document as a template</span>
+        </label>
       </div>
       <template #footer>
         <Button
@@ -3115,6 +3312,13 @@ button.toolbar__status-badge:focus-visible {
 
 .field-hint code {
   color: var(--accent);
+}
+
+.properties-dialog__checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text);
 }
 
 @media (max-width: 1100px) {

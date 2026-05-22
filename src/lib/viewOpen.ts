@@ -8,6 +8,7 @@ import {
 import { normalizeTags } from "@/lib/documentTags";
 
 export const ALL_DOCUMENTS_NODE_KEY = "all";
+export type OpenDocumentTemplateFilter = "all" | "noTemplates" | "onlyTemplates";
 
 export interface OpenCategoryNode {
   key: string;
@@ -25,10 +26,12 @@ export interface OpenDocumentRow {
   detail: string;
 }
 
-export function createOpenViewDefinition(): MindooDBAppViewDefinition {
+export function createOpenViewDefinition(
+  templateFilter: OpenDocumentTemplateFilter = "noTemplates",
+): MindooDBAppViewDefinition {
   const v = createViewLanguage();
-  return {
-    id: "teamedit-open-tags-v1",
+  const definition: MindooDBAppViewDefinition = {
+    id: `teamedit-open-tags-${templateFilter}-v1`,
     title: "TeamEdit documents by tag",
     defaultExpand: "expanded",
     columns: [
@@ -55,6 +58,18 @@ export function createOpenViewDefinition(): MindooDBAppViewDefinition {
       },
     ],
   };
+  if (templateFilter === "noTemplates") {
+    definition.filter = {
+      mode: "expression",
+      expression: v.neq(v.field("istemplate"), true),
+    };
+  } else if (templateFilter === "onlyTemplates") {
+    definition.filter = {
+      mode: "expression",
+      expression: v.eq(v.field("istemplate"), true),
+    };
+  }
+  return definition;
 }
 
 export async function collectNavigatorEntries(navigator: MindooDBAppViewNavigator) {
