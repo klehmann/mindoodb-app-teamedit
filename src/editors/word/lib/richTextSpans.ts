@@ -66,8 +66,8 @@ export function documentToRichTextSpans(document: DocxDocument): MindooDBAppRich
 
 export function commentsFromWordDocument(document: DocxDocument) {
   return mergeCommentArrays(
-    document.package.document.comments,
     readLegacyPackageComments(document),
+    document.package.document.comments,
   );
 }
 

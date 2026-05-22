@@ -843,7 +843,7 @@ async function openSelectedDocument() {
 /** Ask before discarding local edits, otherwise refresh immediately. */
 function requestRefreshCurrentDocument() {
   if (isViewingHistorical.value) {
-    returnToCurrent();
+    void returnToCurrent();
     return;
   }
   if (!canRefresh.value) {
@@ -894,7 +894,7 @@ async function loadHistoricalRevision(
       ?.isCurrent
   ) {
     revisionDialogVisible.value = false;
-    returnToCurrent();
+    await returnToCurrent();
     return;
   }
   try {
@@ -917,6 +917,31 @@ async function loadHistoricalRevision(
     tags.value = [...savedTags.value];
     suppressEditorUpdate = true;
     markdown.value = readHistoricalBody(snapshot);
+    wordEditorDocument.value = null;
+    currentWordDocument.value = null;
+    if (isWordDocument.value) {
+      const fallbackDocument = plainTextToWordDocument(snapshot.data.body);
+      try {
+        const richTextSnapshot = await currentDatabase.value.documents.getRichText(
+          currentDocument.value.id,
+          ["body"],
+          { revisionId },
+        );
+        console.log("[Word history] Rich-text snapshot", {
+          docId: currentDocument.value.id,
+          revisionId,
+          ...summarizeRichTextSpans(richTextSnapshot.spans),
+        });
+        wordEditorDocument.value = richTextSnapshot.spans.length
+          ? richTextSpansToDocument(richTextSnapshot.spans, snapshot.data.comments)
+          : fallbackDocument;
+        currentWordDocument.value = wordEditorDocument.value;
+      } catch (error) {
+        console.warn("Could not load historical Word rich-text snapshot; falling back to materialized text.", error);
+        wordEditorDocument.value = fallbackDocument;
+        currentWordDocument.value = fallbackDocument;
+      }
+    }
     isDirty.value = false;
     imageResolver.clear();
     revisionDialogVisible.value = false;
@@ -932,26 +957,61 @@ async function loadHistoricalRevision(
   }
 }
 
-function returnToCurrent() {
-  if (!currentDocument.value) {
+async function returnToCurrent() {
+  if (!currentDatabase.value || !currentDocument.value) {
     return;
   }
+  const current = await currentDatabase.value.documents.get(currentDocument.value.id);
+  if (!current) {
+    status.value = "The current document is no longer available.";
+    return;
+  }
+
+  let nextWordDocument: DocxDocument | null = null;
+  if (readDocumentType(current) === "word") {
+    const fallbackDocument = plainTextToWordDocument(current.data.body);
+    try {
+      const snapshot = await currentDatabase.value.documents.getRichText(
+        current.id,
+        ["body"],
+      );
+      console.log("[Word current] Rich-text snapshot", {
+        docId: current.id,
+        heads: snapshot.heads,
+        documentComments: Array.isArray(current.data.comments)
+          ? current.data.comments.length
+          : null,
+        ...summarizeRichTextSpans(snapshot.spans),
+      });
+      nextWordDocument = snapshot.spans.length
+        ? richTextSpansToDocument(snapshot.spans, current.data.comments)
+        : fallbackDocument;
+    } catch (error) {
+      console.warn("Could not reload current Word rich-text snapshot; falling back to materialized text.", error);
+      nextWordDocument = fallbackDocument;
+    }
+  }
+
+  currentDocument.value = current;
+  currentDocumentType.value = readDocumentType(current);
   viewingHistoricalSnapshot.value = null;
   imageResolver.clear();
-  textBuffer.value = currentDatabase.value
+  textBuffer.value = currentDocumentType.value === "markdown"
     ? createMindooDBTextBuffer({
         database: currentDatabase.value,
-        document: currentDocument.value,
+        document: current,
         path: ["body"],
       })
     : null;
-  savedSubject.value = readSubject(currentDocument.value);
+  savedSubject.value = readSubject(current);
   subject.value = savedSubject.value;
-  savedTags.value = readTags(currentDocument.value);
+  savedTags.value = readTags(current);
   tags.value = [...savedTags.value];
   suppressEditorUpdate = true;
   markdown.value =
-    textBuffer.value?.value ?? readDocumentBody(currentDocument.value);
+    textBuffer.value?.value ?? readDocumentBody(current);
+  wordEditorDocument.value = nextWordDocument;
+  currentWordDocument.value = nextWordDocument;
   isDirty.value = false;
   queueMicrotask(() => {
     suppressEditorUpdate = false;
@@ -1781,7 +1841,7 @@ function formatRevisionDate(timestamp: number) {
         </p>
         <div class="empty-state__actions">
           <Button
-            label="New markdown document"
+            label="New Markdown document"
             icon="pi pi-file-plus"
             :disabled="!canCreate"
             @click="newMarkdownFile"
