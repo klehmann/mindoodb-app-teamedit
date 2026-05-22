@@ -16,6 +16,7 @@ import Message from "primevue/message";
 import Splitter from "primevue/splitter";
 import SplitterPanel from "primevue/splitterpanel";
 import type { MenuItem } from "primevue/menuitem";
+import { parseDocx } from "@eigenpal/docx-editor-core/docx";
 import type { Document as DocxDocument } from "@eigenpal/docx-editor-core/types/document";
 import {
   createMindooDBAppBridge,
@@ -53,8 +54,10 @@ import {
 } from "@/lib/documentTags";
 import { exportDocxFile } from "@/lib/exportDocx";
 import {
+  createExportFileName,
   exportMarkdownFile,
   exportMarkdownPackage,
+  saveBlobToDisk,
 } from "@/lib/exportMarkdown";
 import { applyImageRatios } from "@/lib/imageRatio";
 import {
@@ -76,6 +79,7 @@ import {
   type OpenDocumentRow,
 } from "@/lib/viewOpen";
 import {
+  attachCommentsToDocument,
   commentsFromWordDocument,
   documentToRichTextSpans,
   plainTextToWordDocument,
@@ -129,6 +133,7 @@ const { updateAvailable, updateReloading, reloadForUpdate } =
 // Bridge/session state is kept in this root component because TeamEdit is a
 // small sample app with one active document at a time.
 const session = ref<MindooDBAppSession | null>(null);
+const currentUserName = ref("User");
 const launchTimeTravelDate = ref<number | null>(null);
 const databases = ref<MindooDBAppDatabaseInfo[]>([]);
 const selectedDatabaseId = ref("");
@@ -138,6 +143,13 @@ const currentDocument = ref<MindooDBAppDocument | null>(null);
 const currentDocumentType = ref<DocumentType>("markdown");
 const currentWordDocument = shallowRef<DocxDocument | null>(null);
 const wordEditorDocument = shallowRef<DocxDocument | null>(null);
+const appDocxImportInputRef = shallowRef<HTMLInputElement | null>(null);
+const wordEditorRef = shallowRef<{
+  openImportDialog: () => void;
+  openPageSetup: () => Promise<boolean>;
+  print: () => void;
+  saveDocx: () => Promise<Blob | null>;
+} | null>(null);
 const viewingHistoricalSnapshot = ref<MindooDBAppHistoricalDocument | null>(
   null,
 );
@@ -290,8 +302,12 @@ const canRefresh = computed(() =>
 const canShowInfo = computed(() =>
   Boolean(currentDatabaseId.value && currentDocument.value),
 );
-const canPrint = computed(() => Boolean(currentDocument.value && isMarkdownDocument.value));
-const canExportDocx = computed(() => Boolean(currentDocument.value && isMarkdownDocument.value));
+const canPrint = computed(() => Boolean(currentDocument.value));
+const canImportDocx = computed(() => canCreate.value);
+const canOpenWordPageSetup = computed(() =>
+  Boolean(currentDocument.value && isWordDocument.value && !editorReadOnly.value),
+);
+const canExportDocx = computed(() => Boolean(currentDocument.value));
 const canExportMarkdown = computed(() => Boolean(currentDocument.value && isMarkdownDocument.value));
 const activeAttachments = computed(
   () => activeDocumentView.value?.attachments ?? [],
@@ -441,6 +457,15 @@ const menuItems = computed<MenuItem[]>(() => [
           void printCurrentDocument();
         },
       },
+      {
+        label: "Page Setup",
+        icon: "pi pi-file-edit",
+        visible: isWordDocument.value,
+        disabled: !canOpenWordPageSetup.value,
+        command: () => {
+          void openWordPageSetup();
+        },
+      },
       { separator: true },
       {
         label: "Delete",
@@ -448,6 +473,15 @@ const menuItems = computed<MenuItem[]>(() => [
         disabled: !canDelete.value,
         command: () => {
           deleteConfirmVisible.value = true;
+        },
+      },
+      { separator: true },
+      {
+        label: "Import DOCX",
+        icon: "pi pi-file-import",
+        disabled: !canImportDocx.value,
+        command: () => {
+          importCurrentDocx();
         },
       },
       { separator: true },
@@ -462,6 +496,7 @@ const menuItems = computed<MenuItem[]>(() => [
       {
         label: "Export Markdown",
         icon: "pi pi-file-export",
+        visible: isMarkdownDocument.value,
         disabled: !canExportMarkdown.value,
         command: () => {
           void exportCurrentMarkdown();
@@ -470,7 +505,7 @@ const menuItems = computed<MenuItem[]>(() => [
       {
         label: "Export Markdown with attachments",
         icon: "pi pi-file-export",
-        visible: hasAttachments.value,
+        visible: isMarkdownDocument.value && hasAttachments.value,
         disabled: !canExportMarkdownWithAttachments.value,
         command: () => {
           void exportCurrentMarkdownWithAttachments();
@@ -481,6 +516,7 @@ const menuItems = computed<MenuItem[]>(() => [
   {
     label: "Display",
     icon: "pi pi-desktop",
+    visible: isMarkdownDocument.value,
     items: [
       {
         label: "Show preview pane",
@@ -525,6 +561,7 @@ onMounted(async () => {
     const nextSession = await bridge.connect();
     session.value = nextSession;
     const context = await nextSession.getLaunchContext();
+    currentUserName.value = context.user.username || "User";
     launchTimeTravelDate.value = context.timeTravelDate ?? null;
     applyAppTheme(context.theme);
     cleanupTheme = nextSession.onThemeChange((theme) => applyAppTheme(theme));
@@ -1100,6 +1137,18 @@ async function printCurrentDocument() {
     return;
   }
 
+  if (isWordDocument.value) {
+    const editor = wordEditorRef.value;
+    if (!editor) {
+      status.value = "The Word editor is not ready yet.";
+      return;
+    }
+    status.value = "Opening Word print dialog...";
+    editor.print();
+    status.value = "Word print dialog opened.";
+    return;
+  }
+
   const printWindow = window.open("", "_blank");
   if (!printWindow) {
     status.value =
@@ -1120,6 +1169,93 @@ async function printCurrentDocument() {
     printWindow.close();
     status.value = error instanceof Error ? error.message : String(error);
   }
+}
+
+function importCurrentDocx() {
+  if (!canImportDocx.value) {
+    status.value = "No writable database is available for DOCX import.";
+    return;
+  }
+  appDocxImportInputRef.value?.click();
+}
+
+async function handleAppDocxImport(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0] ?? null;
+  input.value = "";
+  if (!file) {
+    return;
+  }
+  try {
+    status.value = `Importing ${file.name}...`;
+    const parsed = await parseDocx(await file.arrayBuffer());
+    attachCommentsToDocument(parsed, commentsFromWordDocument(parsed));
+    await importParsedDocxAsNewDocument(file, parsed);
+  } catch (error) {
+    status.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+async function importParsedDocxAsNewDocument(file: File, document: DocxDocument) {
+  const targetDatabaseInfo =
+    selectedDatabaseInfo.value?.capabilities.includes("create") &&
+    selectedDatabaseInfo.value.capabilities.includes("update")
+      ? selectedDatabaseInfo.value
+      : databases.value.find((database) =>
+          database.capabilities.includes("create") &&
+          database.capabilities.includes("update"),
+        );
+  if (!targetDatabaseInfo) {
+    throw new Error("No writable database is available for DOCX import.");
+  }
+
+  selectedDatabaseId.value = targetDatabaseInfo.id;
+  const database = await openDatabaseById(targetDatabaseInfo.id);
+  const comments = commentsFromWordDocument(document);
+  const created = await database.documents.create({
+    set: {
+      subject: createImportedDocxTitle(file),
+      tags: [],
+      type: "word",
+      form: "teamedit",
+      body: "",
+      comments,
+    },
+  });
+  const imported = await database.documents.update(created.id, {
+    set: { comments },
+    richText: [{
+      path: ["body"],
+      baseHeads: created.heads ? [...created.heads] : [],
+      spans: documentToRichTextSpans(document),
+    }],
+  });
+  await loadDocumentIntoEditor(database, targetDatabaseInfo.id, imported);
+  status.value = `Imported ${file.name} as a new Word document.`;
+}
+
+function createImportedDocxTitle(file: File) {
+  return file.name.replace(/\.docx$/i, "").trim() || "Imported Word document";
+}
+
+async function openWordPageSetup() {
+  if (!currentDocument.value || !isWordDocument.value) {
+    status.value = "Open a Word document before changing page setup.";
+    return;
+  }
+  if (editorReadOnly.value) {
+    status.value = "Return to the current version before changing page setup.";
+    return;
+  }
+  const editor = wordEditorRef.value;
+  if (!editor) {
+    status.value = "The Word editor is not ready yet.";
+    return;
+  }
+  const opened = await editor.openPageSetup();
+  status.value = opened
+    ? "Opened Word page setup."
+    : "The Word page setup dialog is not ready yet.";
 }
 
 /** Export only the markdown text, preserving TeamEdit's stable attachment URLs. */
@@ -1151,13 +1287,22 @@ async function exportCurrentDocx() {
   }
 
   if (isWordDocument.value) {
-    const attachmentName = readWordDocxAttachmentName(currentDocument.value);
-    if (!attachmentName) {
-      status.value = "Import a DOCX file before exporting this Word document.";
+    const editor = wordEditorRef.value;
+    if (!editor) {
+      status.value = "The Word editor is not ready yet.";
       return;
     }
-    await downloadAttachment(attachmentName);
-    status.value = "Exported original DOCX attachment.";
+    status.value = "Preparing Word DOCX export...";
+    const blob = await editor.saveDocx();
+    if (!blob) {
+      status.value = "The Word document could not be exported yet.";
+      return;
+    }
+    const saved = await saveBlobToDisk(
+      blob,
+      createExportFileName(subject.value || "Untitled document", "docx"),
+    );
+    status.value = saved ? "Exported Word DOCX file." : "DOCX export cancelled.";
     return;
   }
 
@@ -1175,11 +1320,6 @@ async function exportCurrentDocx() {
     status.value =
       error instanceof Error ? error.message : "The DOCX export failed.";
   }
-}
-
-function readWordDocxAttachmentName(document: MindooDBAppDocument) {
-  const value = document.data.docxAttachment;
-  return typeof value === "string" && value.trim() ? value : null;
 }
 
 /**
@@ -1519,35 +1659,8 @@ function onWordEditorChange(document: DocxDocument) {
 }
 
 async function onWordDocxImport(file: File, document: DocxDocument) {
-  if (!currentDatabase.value || !currentDocument.value) {
-    status.value = "Open or create a Word document before importing DOCX.";
-    return;
-  }
-  if (!canManageAttachments.value) {
-    status.value = "This document database does not allow attachment updates.";
-    return;
-  }
-  const attachmentName = "source.docx";
   try {
-    await uploadFileAttachment(
-      currentDatabase.value,
-      currentDocument.value.id,
-      attachmentName,
-      file,
-    );
-    const updated = await currentDatabase.value.documents.update(
-      currentDocument.value.id,
-      {
-        set: {
-          type: "word",
-          docxAttachment: attachmentName,
-        },
-      },
-    );
-    currentDocument.value = updated;
-    currentWordDocument.value = document;
-    isDirty.value = true;
-    status.value = `Imported ${file.name}.`;
+    await importParsedDocxAsNewDocument(file, document);
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
   }
@@ -1595,6 +1708,13 @@ function formatRevisionDate(timestamp: number) {
 
 <template>
   <main class="app-shell">
+    <input
+      ref="appDocxImportInputRef"
+      class="app-shell__hidden-input"
+      type="file"
+      accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      @change="handleAppDocxImport"
+    />
     <Message
       v-if="updateAvailable"
       severity="warn"
@@ -1807,6 +1927,8 @@ function formatRevisionDate(timestamp: number) {
               </button>
             </div>
             <WordDocumentEditor
+              ref="wordEditorRef"
+              :author="currentUserName"
               :initial-document="wordEditorDocument"
               :readonly="editorReadOnly"
               :title="subject"
@@ -2108,6 +2230,10 @@ function formatRevisionDate(timestamp: number) {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 2px;
+}
+
+.app-shell__hidden-input {
+  display: none;
 }
 
 .app-update-banner {

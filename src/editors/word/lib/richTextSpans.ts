@@ -34,6 +34,11 @@ type RichTextTreeNode =
 type ProseMirrorNode = ReturnType<typeof schema.node>;
 type ProseMirrorMark = ReturnType<typeof schema.mark>;
 
+const A4_PAGE_WIDTH_TWIPS = 11906;
+const A4_PAGE_HEIGHT_TWIPS = 16838;
+const LETTER_PAGE_WIDTH_TWIPS = 12240;
+const LETTER_PAGE_HEIGHT_TWIPS = 15840;
+
 const STRUCTURAL_BLOCKS = new Set([
   "paragraph",
   "heading",
@@ -78,7 +83,7 @@ export function richTextSpansToDocument(
   const repairedSpans = Array.isArray(comments)
     ? repairPendingCommentMarks(spans, comments)
     : spans;
-  const baseDocument = createEmptyDocument();
+  const baseDocument = createDefaultWordDocument();
   const pmDoc = schema.nodes.doc.create(null, buildTopLevelNodes(buildRichTextTree(repairedSpans)));
   const document = updateDocumentContent(baseDocument, pmDoc);
   if (Array.isArray(comments)) {
@@ -133,12 +138,35 @@ export function materializedRichTextToPlainText(value: unknown) {
 
 export function plainTextToWordDocument(value: unknown): DocxDocument {
   const text = materializedRichTextToPlainText(value);
-  return text ? createEmptyDocumentWithText(text) : createEmptyDocument();
+  return text ? createDefaultWordDocumentWithText(text) : createDefaultWordDocument();
 }
 
-function createEmptyDocumentWithText(text: string) {
+export function createDefaultWordDocument(): DocxDocument {
+  const pageSize = getDefaultWordPageSize();
+  return createEmptyDocument({
+    pageWidth: pageSize.width,
+    pageHeight: pageSize.height,
+    orientation: "portrait",
+  });
+}
+
+function getDefaultWordPageSize() {
+  return isLetterPaperLocale(getBrowserLocale())
+    ? { width: LETTER_PAGE_WIDTH_TWIPS, height: LETTER_PAGE_HEIGHT_TWIPS }
+    : { width: A4_PAGE_WIDTH_TWIPS, height: A4_PAGE_HEIGHT_TWIPS };
+}
+
+function getBrowserLocale() {
+  return typeof navigator === "undefined" ? "" : navigator.language;
+}
+
+function isLetterPaperLocale(locale: string) {
+  return locale.replace("_", "-").toLowerCase() === "en-us";
+}
+
+function createDefaultWordDocumentWithText(text: string) {
   const paragraph = schema.nodes.paragraph.create(null, schema.text(text));
-  return updateDocumentContent(createEmptyDocument(), schema.nodes.doc.create(null, [paragraph]));
+  return updateDocumentContent(createDefaultWordDocument(), schema.nodes.doc.create(null, [paragraph]));
 }
 
 function spansFromDocument(document: DocxDocument): MindooDBAppRichTextSpan[] {
