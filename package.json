@@ -73,6 +73,7 @@
   },
   "pnpm": {
     "overrides": {
+      "uuid": "^14.0.0",
       "prosemirror-model": "1.25.4"
     }
   },
