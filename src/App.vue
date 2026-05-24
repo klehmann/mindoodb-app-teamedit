@@ -27,6 +27,7 @@ import {
   type MindooDBAppDocumentHistoryEntry,
   type MindooDBAppDocumentRevisionId,
   type MindooDBAppHistoricalDocument,
+  type MindooDBAppRichTextSpan,
   type MindooDBAppRuntime,
   type MindooDBAppSession,
   type MindooDBAppUiPreferences,
@@ -82,12 +83,21 @@ import {
 import {
   attachCommentsToDocument,
   commentsFromWordDocument,
+  createDefaultWordDocument,
   documentToRichTextSpans,
-  plainTextToWordDocument,
   richTextSpansToDocument,
-  summarizeRichTextSpans,
   summarizeWordDocument,
 } from "@/editors/word/lib/richTextSpans";
+import {
+  loadWordDocumentFromAutomerge,
+  loadWordAutomergeSnapshot,
+  seedWordRichTextDocument,
+  WORD_RICH_TEXT_PATH,
+} from "@/editors/word/lib/wordRichTextSession";
+import {
+  createWordAutomergeHandle,
+  type WordAutomergeHandle,
+} from "@/editors/word/lib/wordAutomergeHandle";
 
 const PREVIEW_PANE_SETTINGS_KEY = "mindoodb-teamedit-preview-pane";
 
@@ -166,6 +176,8 @@ const currentDocument = ref<MindooDBAppDocument | null>(null);
 const currentDocumentType = ref<DocumentType>("markdown");
 const currentWordDocument = shallowRef<DocxDocument | null>(null);
 const wordEditorDocument = shallowRef<DocxDocument | null>(null);
+const wordAutomergeHandle = shallowRef<WordAutomergeHandle | null>(null);
+let wordAutomergeChangeListener: ((snapshot: { spans: MindooDBAppRichTextSpan[] }) => void) | null = null;
 const appDocxImportInputRef = shallowRef<HTMLInputElement | null>(null);
 const wordEditorRef = shallowRef<{
   openImportDialog: () => void;
@@ -673,6 +685,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(async () => {
+  teardownWordAutomergeHandle();
   cleanupTheme?.();
   cleanupUiPreferences?.();
   await session.value?.disconnect();
@@ -977,11 +990,65 @@ function activateSession(session: OpenDocumentSession) {
   markdown.value = session.markdown;
   wordEditorDocument.value = session.wordEditorDocument;
   currentWordDocument.value = session.currentWordDocument;
+  if (session.type === "word" && session.wordEditorDocument) {
+    void setupWordAutomergeHandle(
+      session.database,
+      session.document,
+      documentToRichTextSpans(session.wordEditorDocument),
+      session.isDirty,
+    );
+  } else {
+    teardownWordAutomergeHandle();
+  }
   isDirty.value = session.isDirty;
   imageResolver.clear();
   queueMicrotask(() => {
     suppressEditorUpdate = false;
   });
+}
+
+function teardownWordAutomergeHandle() {
+  const handle = wordAutomergeHandle.value;
+  if (handle && wordAutomergeChangeListener) {
+    handle.off("change", wordAutomergeChangeListener);
+  }
+  wordAutomergeHandle.value = null;
+  wordAutomergeChangeListener = null;
+}
+
+async function setupWordAutomergeHandle(
+  database: MindooDBAppDatabase,
+  document: MindooDBAppDocument,
+  spans: MindooDBAppRichTextSpan[],
+  markDirty: boolean,
+  options?: { revisionId?: MindooDBAppDocumentRevisionId },
+) {
+  teardownWordAutomergeHandle();
+  const snapshot = await loadWordAutomergeSnapshot(database, document.id, options);
+  const handle = createWordAutomergeHandle({
+    database,
+    document,
+    path: [...WORD_RICH_TEXT_PATH],
+    snapshot,
+  });
+  if (markDirty) {
+    handle.replaceSpans(spans);
+  }
+  wordAutomergeChangeListener = (changeSnapshot) => {
+    if (handle.dirty || editorReadOnly.value || suppressEditorUpdate) {
+      return;
+    }
+    const comments = currentDocument.value?.data.comments ?? [];
+    suppressEditorUpdate = true;
+    const reloaded = richTextSpansToDocument(changeSnapshot.spans, comments);
+    wordEditorDocument.value = reloaded;
+    currentWordDocument.value = reloaded;
+    queueMicrotask(() => {
+      suppressEditorUpdate = false;
+    });
+  };
+  handle.on("change", wordAutomergeChangeListener);
+  wordAutomergeHandle.value = handle;
 }
 
 function clearActiveDocumentState() {
@@ -995,6 +1062,7 @@ function clearActiveDocumentState() {
   markdown.value = "";
   wordEditorDocument.value = null;
   currentWordDocument.value = null;
+  teardownWordAutomergeHandle();
   subject.value = "";
   savedSubject.value = "";
   tags.value = [];
@@ -1110,6 +1178,7 @@ async function newWordFile() {
     }
     selectedDatabaseId.value = targetDatabaseInfo.id;
     const database = await openDatabaseById(targetDatabaseInfo.id);
+    const defaultWordDocument = createDefaultWordDocument();
     const document = await database.documents.create({
       set: {
         subject: "",
@@ -1117,12 +1186,11 @@ async function newWordFile() {
         istemplate: false,
         type: "word",
         form: "teamedit",
-        body: "",
         comments: [],
       },
     });
-    const refreshed = await database.documents.get(document.id);
-    await loadDocumentIntoEditor(database, targetDatabaseInfo.id, refreshed ?? document);
+    const seeded = await seedWordRichTextDocument(database, document, defaultWordDocument);
+    await loadDocumentIntoEditor(database, targetDatabaseInfo.id, seeded);
     status.value = `Created Word document ${document.id}.`;
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
@@ -1162,6 +1230,9 @@ async function createDocumentFromTemplate(
     ? templateDatabase
     : await openDatabaseById(targetDatabaseInfo.id);
   const templateData = cloneDocumentData(templateDocument.data);
+  const templateWordDocument = type === "word"
+    ? (await loadWordDocumentFromAutomerge(templateDatabase, templateDocument)).wordDocument
+    : null;
   const created = await targetDatabase.documents.create({
     set: {
       ...templateData,
@@ -1170,33 +1241,21 @@ async function createDocumentFromTemplate(
       istemplate: false,
       type,
       form: "teamedit",
-      body: readDocumentBody(templateDocument),
       ...(type === "word"
-        ? { comments: cloneJsonValue(templateDocument.data.comments) ?? [] }
-        : {}),
+        ? {
+            comments: cloneJsonValue(templateDocument.data.comments) ?? [],
+          }
+        : {
+            body: readDocumentBody(templateDocument),
+          }),
     },
   });
+  const openedDocument = type === "word" && templateWordDocument
+    ? await seedWordRichTextDocument(targetDatabase, created, templateWordDocument)
+    : created;
 
-  let documentToOpen = created;
-  if (type === "word") {
-    const richTextSnapshot = await templateDatabase.documents.getRichText(
-      templateDocument.id,
-      ["body"],
-    );
-    documentToOpen = await targetDatabase.documents.update(created.id, {
-      set: {
-        comments: cloneJsonValue(templateDocument.data.comments) ?? [],
-      },
-      richText: [{
-        path: ["body"],
-        baseHeads: created.heads ? [...created.heads] : [],
-        spans: richTextSnapshot.spans,
-      }],
-    });
-  }
-
-  await loadDocumentIntoEditor(targetDatabase, targetDatabaseInfo.id, documentToOpen);
-  status.value = `Created ${documentToOpen.id} from template.`;
+  await loadDocumentIntoEditor(targetDatabase, targetDatabaseInfo.id, openedDocument);
+  status.value = `Created ${created.id} from template.`;
 }
 
 /** Open the selected document and initialize the editor/text buffer. */
@@ -1299,6 +1358,7 @@ async function loadHistoricalRevision(
     }
     viewingHistoricalSnapshot.value = snapshot;
     textBuffer.value = null;
+    teardownWordAutomergeHandle();
     savedSubject.value = readHistoricalSubject(snapshot);
     subject.value = savedSubject.value;
     savedTags.value = readHistoricalTags(snapshot);
@@ -1309,28 +1369,17 @@ async function loadHistoricalRevision(
     markdown.value = readHistoricalBody(snapshot);
     wordEditorDocument.value = null;
     currentWordDocument.value = null;
-    if (isWordDocument.value) {
-      const fallbackDocument = plainTextToWordDocument(snapshot.data.body);
-      try {
-        const richTextSnapshot = await currentDatabase.value.documents.getRichText(
-          currentDocument.value.id,
-          ["body"],
-          { revisionId },
-        );
-        console.log("[Word history] Rich-text snapshot", {
-          docId: currentDocument.value.id,
-          revisionId,
-          ...summarizeRichTextSpans(richTextSnapshot.spans),
-        });
-        wordEditorDocument.value = richTextSnapshot.spans.length
-          ? richTextSpansToDocument(richTextSnapshot.spans, snapshot.data.comments)
-          : fallbackDocument;
-        currentWordDocument.value = wordEditorDocument.value;
-      } catch (error) {
-        console.warn("Could not load historical Word rich-text snapshot; falling back to materialized text.", error);
-        wordEditorDocument.value = fallbackDocument;
-        currentWordDocument.value = fallbackDocument;
-      }
+    if (isWordDocument.value && currentDatabase.value && currentDocument.value) {
+      const { wordDocument } = await loadWordDocumentFromAutomerge(
+        currentDatabase.value,
+        {
+          ...currentDocument.value,
+          data: snapshot.data,
+        },
+        { revisionId },
+      );
+      wordEditorDocument.value = wordDocument;
+      currentWordDocument.value = wordDocument;
     }
     isDirty.value = false;
     imageResolver.clear();
@@ -1359,27 +1408,10 @@ async function returnToCurrent() {
 
   let nextWordDocument: DocxDocument | null = null;
   if (readDocumentType(current) === "word") {
-    const fallbackDocument = plainTextToWordDocument(current.data.body);
-    try {
-      const snapshot = await currentDatabase.value.documents.getRichText(
-        current.id,
-        ["body"],
-      );
-      console.log("[Word current] Rich-text snapshot", {
-        docId: current.id,
-        heads: snapshot.heads,
-        documentComments: Array.isArray(current.data.comments)
-          ? current.data.comments.length
-          : null,
-        ...summarizeRichTextSpans(snapshot.spans),
-      });
-      nextWordDocument = snapshot.spans.length
-        ? richTextSpansToDocument(snapshot.spans, current.data.comments)
-        : fallbackDocument;
-    } catch (error) {
-      console.warn("Could not reload current Word rich-text snapshot; falling back to materialized text.", error);
-      nextWordDocument = fallbackDocument;
-    }
+    ({ wordDocument: nextWordDocument } = await loadWordDocumentFromAutomerge(
+      currentDatabase.value,
+      current,
+    ));
   }
 
   currentDocument.value = current;
@@ -1404,6 +1436,16 @@ async function returnToCurrent() {
     textBuffer.value?.value ?? readDocumentBody(current);
   wordEditorDocument.value = nextWordDocument;
   currentWordDocument.value = nextWordDocument;
+  if (nextWordDocument) {
+    void setupWordAutomergeHandle(
+      currentDatabase.value,
+      current,
+      documentToRichTextSpans(nextWordDocument),
+      false,
+    );
+  } else {
+    teardownWordAutomergeHandle();
+  }
   isDirty.value = false;
   queueMicrotask(() => {
     suppressEditorUpdate = false;
@@ -1568,26 +1610,18 @@ async function importParsedDocxAsNewDocument(file: File, document: DocxDocument)
   selectedDatabaseId.value = targetDatabaseInfo.id;
   const database = await openDatabaseById(targetDatabaseInfo.id);
   const comments = commentsFromWordDocument(document);
-  const created = await database.documents.create({
+  const imported = await database.documents.create({
     set: {
       subject: createImportedDocxTitle(file),
       tags: [],
       istemplate: false,
       type: "word",
       form: "teamedit",
-      body: "",
       comments,
     },
   });
-  const imported = await database.documents.update(created.id, {
-    set: { comments },
-    richText: [{
-      path: ["body"],
-      baseHeads: created.heads ? [...created.heads] : [],
-      spans: documentToRichTextSpans(document),
-    }],
-  });
-  await loadDocumentIntoEditor(database, targetDatabaseInfo.id, imported);
+  const seeded = await seedWordRichTextDocument(database, imported, document);
+  await loadDocumentIntoEditor(database, targetDatabaseInfo.id, seeded);
   status.value = `Imported ${file.name} as a new Word document.`;
 }
 
@@ -1746,33 +1780,73 @@ async function saveFile() {
   }
   try {
     let document = currentDocument.value;
-    const baseHeads = document.heads ? [...document.heads] : [];
-    if (subjectDirty.value || tagsDirty.value || templateDirty.value || isWordDocument.value) {
+    const hasMetadataChanges = subjectDirty.value || tagsDirty.value || templateDirty.value;
+    const documentMetadataSet = {
+      subject: subject.value,
+      tags: tags.value,
+      istemplate: isTemplate.value,
+      type: currentDocumentType.value,
+    };
+    if (!isWordDocument.value && hasMetadataChanges) {
       document = await currentDatabase.value.documents.update(document.id, {
-        set: {
-          subject: subject.value,
-          tags: tags.value,
-          istemplate: isTemplate.value,
-          type: currentDocumentType.value,
-        },
+        set: documentMetadataSet,
       });
       currentDocument.value = document;
     }
 
     if (isWordDocument.value) {
-      if (currentWordDocument.value && isDirty.value) {
+      let wordReconciled = false;
+      let spansForHandle = wordAutomergeHandle.value?.spans ?? [];
+      const wordComments = currentWordDocument.value
+        ? commentsFromWordDocument(currentWordDocument.value)
+        : [];
+      const hasCommentChanges = JSON.stringify(wordComments) !== JSON.stringify(document.data.comments ?? []);
+
+      if (wordAutomergeHandle.value?.dirty) {
+        const result = await wordAutomergeHandle.value.flush();
+        document = result.document;
+        currentDocument.value = document;
+        wordReconciled = result.reconciled;
+        spansForHandle = result.spans;
+        suppressEditorUpdate = true;
+        const reloaded = richTextSpansToDocument(
+          result.spans,
+          cloneJsonValue(document.data.comments ?? []),
+        );
+        wordEditorDocument.value = reloaded;
+        currentWordDocument.value = reloaded;
+        queueMicrotask(() => {
+          suppressEditorUpdate = false;
+        });
+      }
+
+      if (hasMetadataChanges || hasCommentChanges) {
         document = await currentDatabase.value.documents.update(document.id, {
           set: {
-            comments: commentsFromWordDocument(currentWordDocument.value),
+            ...(hasMetadataChanges
+              ? {
+                  subject: subject.value,
+                  tags: tags.value,
+                  istemplate: isTemplate.value,
+                  type: currentDocumentType.value,
+                }
+              : {}),
+            ...(hasCommentChanges ? { comments: wordComments } : {}),
           },
-          richText: [{
-            path: ["body"],
-            baseHeads,
-            spans: documentToRichTextSpans(currentWordDocument.value),
-          }],
         });
         currentDocument.value = document;
       }
+
+      if (!spansForHandle.length && currentWordDocument.value) {
+        spansForHandle = documentToRichTextSpans(currentWordDocument.value);
+      }
+
+      await setupWordAutomergeHandle(
+        currentDatabase.value,
+        document,
+        spansForHandle,
+        false,
+      );
       savedSubject.value = readSubject(document);
       subject.value = savedSubject.value;
       savedTags.value = readTags(document);
@@ -1781,7 +1855,9 @@ async function saveFile() {
       isTemplate.value = savedIsTemplate.value;
       isDirty.value = false;
       snapshotActiveSession();
-      status.value = "Saved Word document.";
+      status.value = wordReconciled
+        ? "Saved Word document and reconciled concurrent edits."
+        : "Saved Word document.";
       return;
     }
 
@@ -1961,28 +2037,13 @@ async function createDocumentSession(
   let sessionWordDocument: DocxDocument | null = null;
 
   if (type === "word") {
-    const fallbackDocument = plainTextToWordDocument(document.data.body);
-    try {
-      const snapshot = await database.documents.getRichText(document.id, ["body"]);
-      console.log("[Word load] Rich-text snapshot", {
-        docId: document.id,
-        heads: snapshot.heads,
-        documentComments: Array.isArray(document.data.comments)
-          ? document.data.comments.length
-          : null,
-        ...summarizeRichTextSpans(snapshot.spans),
-      });
-      sessionWordDocument = snapshot.spans.length
-        ? richTextSpansToDocument(snapshot.spans, document.data.comments)
-        : fallbackDocument;
-      console.log("[Word load] Editor document model", {
-        docId: document.id,
-        ...summarizeWordDocument(sessionWordDocument),
-      });
-    } catch (error) {
-      console.warn("Could not load Word rich-text snapshot; falling back to materialized text.", error);
-      sessionWordDocument = fallbackDocument;
-    }
+    const loaded = await loadWordDocumentFromAutomerge(database, document);
+    sessionWordDocument = loaded.wordDocument;
+    console.log("[Word load] Editor document model", {
+      docId: document.id,
+      spanCount: loaded.snapshot.spans.length,
+      ...summarizeWordDocument(sessionWordDocument),
+    });
   }
 
   return {
@@ -2053,7 +2114,8 @@ function onWordEditorChange(document: DocxDocument) {
   }
   currentWordDocument.value = document;
   if (!suppressEditorUpdate) {
-    isDirty.value = true;
+    wordAutomergeHandle.value?.replaceSpans(documentToRichTextSpans(document));
+    isDirty.value = wordAutomergeHandle.value?.dirty ?? false;
     snapshotActiveSession();
   }
 }

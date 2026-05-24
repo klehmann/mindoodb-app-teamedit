@@ -132,6 +132,42 @@ This keeps the bridge purely JSON, so apps never have to ship an Automerge runti
 
 If you want to inspect the merge result without saving, use the **Refresh** action in the toolbar to re-read the canonical document from Haven.
 
+## Word document editing
+
+TeamEdit also supports **Word documents** (`type: "word"`) through the `@eigenpal/docx-editor-vue` editor. Word docs share the same top-level field name as markdown — `["body"]` — but use Automerge **rich text** rather than plain text. The app never calls `set: { body: ... }` on Word saves; all body edits go through the SDK's `richText` patch API.
+
+### Load / edit / save flow
+
+1. **Load:** `documents.getRichText(docId, ["body"])` returns JSON-safe rich-text spans. TeamEdit converts them to a docx-editor `Document` via `richTextSpansToDocument`.
+2. **Edit:** `createMindooDBRichTextHandle` tracks local span snapshots. Each editor change calls `handle.replaceSpans(documentToRichTextSpans(document))`.
+3. **Save:** `handle.flush()` sends incremental rich-text splices when text changed (merge-friendly, like the markdown text buffer), or full span snapshots for formatting-only edits. After every save, the editor reloads from the canonical spans Haven returns.
+4. **Manual refresh:** Use **Refresh** in the toolbar to re-read the document from Haven when another client may have saved changes.
+
+Comments remain a separate top-level JSON field (`comments`) and are saved with ordinary `set` patches, independent of the rich-text body.
+
+### Span conversion
+
+Conversion between docx-editor ProseMirror documents and MindooDB spans lives under `src/editors/word/lib/`:
+
+- `automergeSchemaAdapter.ts` — maps the docx-editor schema to `@automerge/prosemirror`'s `SchemaAdapter`
+- `automergeSpanUtils.ts` — table block markers, span normalization, and JSON dehydration/revival
+- `richTextSpans.ts` — public `documentToRichTextSpans` / `richTextSpansToDocument` helpers
+
+`@automerge/automerge` is used only for span conversion in the browser bundle; the app still does not own an Automerge replica. Haven applies rich-text patches on the server side.
+
+### Creating and importing Word documents
+
+New Word files, DOCX imports, and documents created from Word templates seed rich text explicitly after document creation:
+
+```ts
+await db.documents.create({ set: { type: "word", form: "teamedit", comments: [], /* ... */ } });
+await db.documents.update(docId, {
+  richText: [{ path: ["body"], spans: documentToRichTextSpans(docxDocument) }],
+});
+```
+
+Historical Word revisions load read-only content via `documents.getRichText(docId, ["body"], { revisionId })`.
+
 ## Milkdown editor extensions
 
 TeamEdit uses Milkdown's Crepe editor as the editing surface, but extends it in a few app-specific places:
@@ -322,6 +358,7 @@ The Vitest suite covers the non-trivial pure helpers used by the attachment, ren
 - `src/lib/markdownRendering.test.ts` -- Mermaid placeholder generation, syntax-highlighted code fences, KaTeX math, task lists, footnotes, safe alignment wrappers, image URL rewriting, Milkdown `<br>` normalization, and the Crepe ratio/caption translation used by the preview and print views.
 - `src/lib/mermaid.test.ts` -- Mermaid SVG sanitization and label conversion for Crepe previews.
 - `src/lib/printMarkdown.test.ts` -- print-window rendering, asset waiting, attachment image resolution, and Mermaid hydration.
+- `src/editors/word/lib/richTextSpans.test.ts` -- Word rich-text span round-trips, bold mark preservation, and table structure.
 
 Run them with:
 

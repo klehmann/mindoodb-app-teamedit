@@ -24,6 +24,8 @@
     "@fontsource/inter": "^5.2.8",
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/rubik": "^5.2.8",
+    "@automerge/automerge": "^3.2.6",
+    "@automerge/prosemirror": "^0.2.0",
     "@eigenpal/docx-editor-core": "^1.0.2",
     "@eigenpal/docx-editor-vue": "^1.0.2",
     "@milkdown/crepe": "^7.17.1",
@@ -43,6 +45,8 @@
     "mindoodb-view-language": "0.0.13",
     "primeicons": "^7.0.0",
     "primevue": "^4.5.4",
+    "prosemirror-model": "1.25.4",
+    "prosemirror-state": "^1.4.4",
     "stream-browserify": "^3.0.0",
     "util": "^0.12.5",
     "vue": "^3.5.31",
@@ -67,7 +71,13 @@
     "vue-tsc": "^3.2.6",
     "wrangler": "^4.83.0"
   },
+  "pnpm": {
+    "overrides": {
+      "prosemirror-model": "1.25.4"
+    }
+  },
   "overrides": {
-    "uuid": "^14.0.0"
+    "uuid": "^14.0.0",
+    "prosemirror-model": "1.25.4"
   }
 }

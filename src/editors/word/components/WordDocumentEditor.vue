@@ -9,7 +9,6 @@ import {
   attachCommentsToDocument,
   commentsFromWordDocument,
   createDefaultWordDocument,
-  summarizeWordDocument,
 } from "@/editors/word/lib/richTextSpans";
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -49,8 +48,6 @@ watch(
     documentModel.value = nextDocument;
     editorInstanceKey.value += 1;
     await nextTick();
-    // If the embedded editor does not emit `ready`, do not keep the component
-    // permanently hydrating. Normal ready-driven hydration usually wins first.
     window.setTimeout(() => completeHydration(generation), 250);
   },
   { immediate: true },
@@ -86,7 +83,6 @@ async function handleChange(document: unknown) {
   await nextTick();
   const nextDocument = readCurrentEditorDocument(document);
   applyCommentAuthor(nextDocument);
-  console.log("[Word editor] change", summarizeWordDocument(nextDocument));
   if (isHydrating.value) {
     documentModel.value = nextDocument;
     return;
@@ -96,13 +92,11 @@ async function handleChange(document: unknown) {
 
 async function handleUpdateDocument(document: unknown) {
   if (!document) {
-    console.log("[Word editor] update:document", { document: null });
     return;
   }
   await nextTick();
   const nextDocument = readCurrentEditorDocument(document);
   applyCommentAuthor(nextDocument);
-  console.log("[Word editor] update:document", summarizeWordDocument(nextDocument));
   if (isHydrating.value) {
     documentModel.value = nextDocument;
     return;
@@ -112,8 +106,6 @@ async function handleUpdateDocument(document: unknown) {
 
 async function handleReady() {
   await nextTick();
-  const document = editorRef.value?.getDocument?.() as DocxDocument | null | undefined;
-  console.log("[Word editor] ready", document ? summarizeWordDocument(document) : { document: null });
   await nextTick();
   window.setTimeout(() => completeHydration(hydrationGeneration), 0);
 }
@@ -133,9 +125,6 @@ function cloneWordDocument(document: DocxDocument) {
   return structuredClone(document) as DocxDocument;
 }
 
-// The Vue DOCX editor currently creates UI comments with the hard-coded
-// author "User"; replace only that default so imported or existing authors
-// remain intact while new TeamEdit comments use the SDK launch username.
 function applyCommentAuthor(document: DocxDocument) {
   const author = props.author?.trim();
   if (!author) {
@@ -181,10 +170,6 @@ async function openPageSetup() {
     return false;
   }
 
-  // The Vue DOCX editor has no public page-setup ref API yet. Its dialog is
-  // only opened through the built-in File menu, so TeamEdit triggers that
-  // existing menu item from here while keeping file open/save centralized in
-  // the app-level menu.
   const root = editorRootRef.value;
   const trigger = root?.querySelector<HTMLButtonElement>(DOCX_FILE_MENU_TRIGGER_SELECTOR);
   if (!trigger) {
@@ -327,19 +312,12 @@ defineExpose({
   display: none;
 }
 
-/* The Vue DOCX editor only exposes a whole-title-bar toggle today, not a
-   partial menu API. TeamEdit owns file open/save/export, so hide just the
-   embedded File dropdown while keeping Format/Insert/Help available. */
 .word-editor :deep(.menu-bar > .docx-popover:first-child) {
   display: none;
 }
 
 .word-editor__error {
-  color: var(--muted);
-  font-size: 0.85rem;
-}
-
-.word-editor__error {
   color: var(--danger);
+  font-size: 0.85rem;
 }
 </style>
