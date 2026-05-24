@@ -89,6 +89,10 @@ export class WordAutomergeHandle {
     this.dirtyInternal = true;
   }
 
+  syncDocument(document: MindooDBAppDocument) {
+    this.options.document = document;
+  }
+
   async flush(options?: {
     spans?: MindooDBAppRichTextSpan[];
   }): Promise<WordAutomergeHandleFlushResult> {
@@ -116,17 +120,19 @@ export class WordAutomergeHandle {
 
     const localSpansAtFlush = this.spans;
 
+    const replicaHeads = A.getHeads(this.doc) as A.Heads;
+
     const result = await this.options.database.documents.applyAutomergeChanges(
       this.options.document.id,
       {
         baseHeads: this.baseHeads,
+        replicaHeads: [...replicaHeads],
         changes,
       },
     );
 
-    const snapshot = await this.refresh();
-    this.doc = A.load(snapshot.binary);
-    this.baseHeads = [...snapshot.heads];
+    this.reconcileLocalReplicaAfterApply(result, replicaHeads);
+    this.baseHeads = [...result.heads];
     this.dirtyInternal = false;
     this.options.document = result.document;
     const mergedSpans = this.spans;
@@ -158,6 +164,28 @@ export class WordAutomergeHandle {
     return changed;
   }
 
+  private async reconcileLocalReplicaAfterApply(
+    result: Awaited<
+      ReturnType<MindooDBAppDatabase["documents"]["applyAutomergeChanges"]>
+    >,
+    replicaHeadsBeforeApply: A.Heads,
+  ) {
+    if (result.changesSince) {
+      if (result.changesSince.changes.length > 0) {
+        [this.doc] = A.applyChanges(
+          this.doc,
+          result.changesSince.changes.map((change) => new Uint8Array(change)),
+        );
+      }
+      return;
+    }
+
+    if (!automergeHeadsEqual(replicaHeadsBeforeApply, result.heads)) {
+      const snapshot = await this.refresh();
+      this.doc = A.load(snapshot.binary);
+    }
+  }
+
   private emitChange() {
     const snapshot = { spans: this.spans };
     for (const listener of this.listeners) {
@@ -187,4 +215,11 @@ function readRichTextSpans(
   return dehydrateRichTextSpans(
     A.spans(doc, path as A.Prop[]) as A.Span[],
   );
+}
+
+function automergeHeadsEqual(left: readonly string[], right: readonly string[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  return [...left].sort().join("|") === [...right].sort().join("|");
 }

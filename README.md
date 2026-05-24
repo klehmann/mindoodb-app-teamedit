@@ -140,7 +140,7 @@ TeamEdit also supports **Word documents** (`type: "word"`) through the `@eigenpa
 
 1. **Load:** `documents.getAutomergeSnapshot(docId)` returns the full Automerge binary. TeamEdit loads a local replica and converts spans at `["body"]` to a docx-editor `Document`.
 2. **Edit:** Typing updates only the docx-editor model. Automerge conversion runs on **save**, not on every keystroke.
-3. **Save:** `flush({ spans })` applies one `updateSpans` to the local replica, then sends raw Automerge change bytes via `documents.applyAutomergeChanges`. After save, the editor reloads from Haven's merged snapshot.
+3. **Save:** `flush({ spans })` applies one `updateSpans` to the local replica, then sends raw Automerge change bytes via `documents.applyAutomergeChanges` with `replicaHeads`. Haven returns `changesSince` in the response so TeamEdit can reconcile the local replica incrementally instead of reloading a full snapshot.
 4. **Manual refresh:** Use **Refresh** in the toolbar to re-read the document from Haven when another client may have saved changes.
 
 Comments remain a separate top-level JSON field (`comments`) and are saved with ordinary `set` patches, independent of the rich-text body.

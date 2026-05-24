@@ -1804,6 +1804,7 @@ async function saveFile() {
 
     if (isWordDocument.value) {
       let wordReconciled = false;
+      let wordBodyFlushed = false;
       const wordComments = currentWordDocument.value
         ? commentsFromWordDocument(currentWordDocument.value)
         : [];
@@ -1816,6 +1817,7 @@ async function saveFile() {
         document = result.document;
         currentDocument.value = document;
         wordReconciled = result.reconciled;
+        wordBodyFlushed = true;
         suppressEditorUpdate = true;
         const reloaded = richTextSpansToDocument(
           result.spans,
@@ -1845,10 +1847,19 @@ async function saveFile() {
         currentDocument.value = document;
       }
 
-      await setupWordAutomergeHandle(
-        currentDatabase.value,
-        document,
-      );
+      if (
+        wordBodyFlushed
+        && !hasMetadataChanges
+        && !hasCommentChanges
+        && wordAutomergeHandle.value
+      ) {
+        wordAutomergeHandle.value.syncDocument(document);
+      } else {
+        await setupWordAutomergeHandle(
+          currentDatabase.value,
+          document,
+        );
+      }
       savedSubject.value = readSubject(document);
       subject.value = savedSubject.value;
       savedTags.value = readTags(document);
