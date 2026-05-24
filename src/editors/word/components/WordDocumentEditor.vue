@@ -79,17 +79,6 @@ function openImportDialog() {
   importInputRef.value?.click();
 }
 
-async function handleChange(document: unknown) {
-  await nextTick();
-  const nextDocument = readCurrentEditorDocument(document);
-  applyCommentAuthor(nextDocument);
-  if (isHydrating.value) {
-    documentModel.value = nextDocument;
-    return;
-  }
-  emit("change", nextDocument);
-}
-
 async function handleUpdateDocument(document: unknown) {
   if (!document) {
     return;
@@ -290,7 +279,6 @@ defineExpose({
       :mode="readonly ? 'viewing' : 'editing'"
       :read-only="readonly"
       :show-toolbar="!readonly"
-      @change="handleChange"
       @update:document="handleUpdateDocument"
       @ready="handleReady"
     />

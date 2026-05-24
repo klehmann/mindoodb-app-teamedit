@@ -138,9 +138,9 @@ TeamEdit also supports **Word documents** (`type: "word"`) through the `@eigenpa
 
 ### Load / edit / save flow
 
-1. **Load:** `documents.getRichText(docId, ["body"])` returns JSON-safe rich-text spans. TeamEdit converts them to a docx-editor `Document` via `richTextSpansToDocument`.
-2. **Edit:** `createMindooDBRichTextHandle` tracks local span snapshots. Each editor change calls `handle.replaceSpans(documentToRichTextSpans(document))`.
-3. **Save:** `handle.flush()` sends incremental rich-text splices when text changed (merge-friendly, like the markdown text buffer), or full span snapshots for formatting-only edits. After every save, the editor reloads from the canonical spans Haven returns.
+1. **Load:** `documents.getAutomergeSnapshot(docId)` returns the full Automerge binary. TeamEdit loads a local replica and converts spans at `["body"]` to a docx-editor `Document`.
+2. **Edit:** Typing updates only the docx-editor model. Automerge conversion runs on **save**, not on every keystroke.
+3. **Save:** `flush({ spans })` applies one `updateSpans` to the local replica, then sends raw Automerge change bytes via `documents.applyAutomergeChanges`. After save, the editor reloads from Haven's merged snapshot.
 4. **Manual refresh:** Use **Refresh** in the toolbar to re-read the document from Haven when another client may have saved changes.
 
 Comments remain a separate top-level JSON field (`comments`) and are saved with ordinary `set` patches, independent of the rich-text body.
@@ -151,9 +151,9 @@ Conversion between docx-editor ProseMirror documents and MindooDB spans lives un
 
 - `automergeSchemaAdapter.ts` — maps the docx-editor schema to `@automerge/prosemirror`'s `SchemaAdapter`
 - `automergeSpanUtils.ts` — table block markers, span normalization, and JSON dehydration/revival
-- `richTextSpans.ts` — public `documentToRichTextSpans` / `richTextSpansToDocument` helpers
+- `wordAutomergeHandle.ts` — local Automerge replica; converts and flushes on save
 
-`@automerge/automerge` is used only for span conversion in the browser bundle; the app still does not own an Automerge replica. Haven applies rich-text patches on the server side.
+`@automerge/automerge` runs in the browser for the local replica and span conversion; Haven stores encrypted Automerge change bytes.
 
 ### Creating and importing Word documents
 

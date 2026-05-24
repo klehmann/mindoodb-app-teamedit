@@ -71,6 +71,11 @@ export class WordAutomergeHandle {
   }
 
   replaceSpans(spans: MindooDBAppRichTextSpan[]) {
+    this.applySpansToLocalDoc(spans);
+    this.emitChange();
+  }
+
+  private applySpansToLocalDoc(spans: MindooDBAppRichTextSpan[]) {
     const nativeSpans = reviveRichTextSpans(spans);
     this.doc = A.change(this.doc, (draft) => {
       updateSpansWithDiagnostics(
@@ -82,29 +87,15 @@ export class WordAutomergeHandle {
       );
     });
     this.dirtyInternal = true;
-    this.emitChange();
   }
 
-  async refresh() {
-    return this.options.database.documents.getAutomergeSnapshot(
-      this.options.document.id,
-    );
-  }
-
-  reconcile(document: MindooDBAppDocument, snapshot: MindooDBAppAutomergeSnapshot) {
-    const previous = JSON.stringify(this.spans);
-    this.doc = A.load(snapshot.binary);
-    this.baseHeads = [...snapshot.heads];
-    this.dirtyInternal = false;
-    this.options.document = document;
-    const changed = JSON.stringify(this.spans) !== previous;
-    if (changed) {
-      this.emitChange();
+  async flush(options?: {
+    spans?: MindooDBAppRichTextSpan[];
+  }): Promise<WordAutomergeHandleFlushResult> {
+    if (options?.spans) {
+      this.applySpansToLocalDoc(options.spans);
     }
-    return changed;
-  }
 
-  async flush(): Promise<WordAutomergeHandleFlushResult> {
     if (!this.dirtyInternal) {
       return {
         document: this.options.document,
@@ -146,6 +137,25 @@ export class WordAutomergeHandle {
       spans: mergedSpans,
       reconciled,
     };
+  }
+
+  async refresh() {
+    return this.options.database.documents.getAutomergeSnapshot(
+      this.options.document.id,
+    );
+  }
+
+  reconcile(document: MindooDBAppDocument, snapshot: MindooDBAppAutomergeSnapshot) {
+    const previous = JSON.stringify(this.spans);
+    this.doc = A.load(snapshot.binary);
+    this.baseHeads = [...snapshot.heads];
+    this.dirtyInternal = false;
+    this.options.document = document;
+    const changed = JSON.stringify(this.spans) !== previous;
+    if (changed) {
+      this.emitChange();
+    }
+    return changed;
   }
 
   private emitChange() {

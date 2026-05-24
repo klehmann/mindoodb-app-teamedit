@@ -178,6 +178,8 @@ const currentWordDocument = shallowRef<DocxDocument | null>(null);
 const wordEditorDocument = shallowRef<DocxDocument | null>(null);
 const wordAutomergeHandle = shallowRef<WordAutomergeHandle | null>(null);
 let wordAutomergeChangeListener: ((snapshot: { spans: MindooDBAppRichTextSpan[] }) => void) | null = null;
+let snapshotActiveSessionTimer: ReturnType<typeof setTimeout> | null = null;
+const SNAPSHOT_ACTIVE_SESSION_DEBOUNCE_MS = 300;
 const appDocxImportInputRef = shallowRef<HTMLInputElement | null>(null);
 const wordEditorRef = shallowRef<{
   openImportDialog: () => void;
@@ -685,6 +687,10 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(async () => {
+  if (snapshotActiveSessionTimer) {
+    clearTimeout(snapshotActiveSessionTimer);
+    snapshotActiveSessionTimer = null;
+  }
   teardownWordAutomergeHandle();
   cleanupTheme?.();
   cleanupUiPreferences?.();
@@ -942,6 +948,10 @@ function sessionHasLocalEdits(session: OpenDocumentSession) {
 }
 
 function snapshotActiveSession() {
+  if (snapshotActiveSessionTimer) {
+    clearTimeout(snapshotActiveSessionTimer);
+    snapshotActiveSessionTimer = null;
+  }
   if (viewingHistoricalSnapshot.value) {
     return;
   }
@@ -972,6 +982,16 @@ function snapshotActiveSession() {
   openDocumentSessions.value = [...openDocumentSessions.value];
 }
 
+function scheduleSnapshotActiveSession() {
+  if (snapshotActiveSessionTimer) {
+    clearTimeout(snapshotActiveSessionTimer);
+  }
+  snapshotActiveSessionTimer = setTimeout(() => {
+    snapshotActiveSessionTimer = null;
+    snapshotActiveSession();
+  }, SNAPSHOT_ACTIVE_SESSION_DEBOUNCE_MS);
+}
+
 function activateSession(session: OpenDocumentSession) {
   activeDocumentSessionId.value = session.id;
   currentDatabase.value = session.database;
@@ -991,12 +1011,7 @@ function activateSession(session: OpenDocumentSession) {
   wordEditorDocument.value = session.wordEditorDocument;
   currentWordDocument.value = session.currentWordDocument;
   if (session.type === "word" && session.wordEditorDocument) {
-    void setupWordAutomergeHandle(
-      session.database,
-      session.document,
-      documentToRichTextSpans(session.wordEditorDocument),
-      session.isDirty,
-    );
+    void setupWordAutomergeHandle(session.database, session.document);
   } else {
     teardownWordAutomergeHandle();
   }
@@ -1019,8 +1034,6 @@ function teardownWordAutomergeHandle() {
 async function setupWordAutomergeHandle(
   database: MindooDBAppDatabase,
   document: MindooDBAppDocument,
-  spans: MindooDBAppRichTextSpan[],
-  markDirty: boolean,
   options?: { revisionId?: MindooDBAppDocumentRevisionId },
 ) {
   teardownWordAutomergeHandle();
@@ -1031,11 +1044,8 @@ async function setupWordAutomergeHandle(
     path: [...WORD_RICH_TEXT_PATH],
     snapshot,
   });
-  if (markDirty) {
-    handle.replaceSpans(spans);
-  }
   wordAutomergeChangeListener = (changeSnapshot) => {
-    if (handle.dirty || editorReadOnly.value || suppressEditorUpdate) {
+    if (isDirty.value || editorReadOnly.value || suppressEditorUpdate) {
       return;
     }
     const comments = currentDocument.value?.data.comments ?? [];
@@ -1440,8 +1450,6 @@ async function returnToCurrent() {
     void setupWordAutomergeHandle(
       currentDatabase.value,
       current,
-      documentToRichTextSpans(nextWordDocument),
-      false,
     );
   } else {
     teardownWordAutomergeHandle();
@@ -1796,18 +1804,18 @@ async function saveFile() {
 
     if (isWordDocument.value) {
       let wordReconciled = false;
-      let spansForHandle = wordAutomergeHandle.value?.spans ?? [];
       const wordComments = currentWordDocument.value
         ? commentsFromWordDocument(currentWordDocument.value)
         : [];
       const hasCommentChanges = JSON.stringify(wordComments) !== JSON.stringify(document.data.comments ?? []);
 
-      if (wordAutomergeHandle.value?.dirty) {
-        const result = await wordAutomergeHandle.value.flush();
+      if (isDirty.value && wordAutomergeHandle.value && currentWordDocument.value) {
+        const result = await wordAutomergeHandle.value.flush({
+          spans: documentToRichTextSpans(currentWordDocument.value),
+        });
         document = result.document;
         currentDocument.value = document;
         wordReconciled = result.reconciled;
-        spansForHandle = result.spans;
         suppressEditorUpdate = true;
         const reloaded = richTextSpansToDocument(
           result.spans,
@@ -1837,15 +1845,9 @@ async function saveFile() {
         currentDocument.value = document;
       }
 
-      if (!spansForHandle.length && currentWordDocument.value) {
-        spansForHandle = documentToRichTextSpans(currentWordDocument.value);
-      }
-
       await setupWordAutomergeHandle(
         currentDatabase.value,
         document,
-        spansForHandle,
-        false,
       );
       savedSubject.value = readSubject(document);
       subject.value = savedSubject.value;
@@ -2114,9 +2116,8 @@ function onWordEditorChange(document: DocxDocument) {
   }
   currentWordDocument.value = document;
   if (!suppressEditorUpdate) {
-    wordAutomergeHandle.value?.replaceSpans(documentToRichTextSpans(document));
-    isDirty.value = wordAutomergeHandle.value?.dirty ?? false;
-    snapshotActiveSession();
+    isDirty.value = true;
+    scheduleSnapshotActiveSession();
   }
 }
 
