@@ -280,6 +280,7 @@ defineExpose({
       :read-only="readonly"
       :show-toolbar="!readonly"
       @update:document="handleUpdateDocument"
+      @change="handleUpdateDocument"
       @ready="handleReady"
     />
   </section>
