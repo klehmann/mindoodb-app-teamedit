@@ -103,8 +103,9 @@ describe("richTextSpans", () => {
 
     expect(cellSpan?.type).toBe("block");
     if (cellSpan?.type === "block") {
-      expect(cellSpan.value.attrs?.backgroundColor).toBe("F4B183");
-      expect(cellSpan.value.attrs?._originalFormatting).toMatchObject({
+      const attrs = cellSpan.value.attrs as Record<string, unknown> | undefined;
+      expect(attrs?.backgroundColor).toBe("F4B183");
+      expect(attrs?._originalFormatting).toMatchObject({
         shading: {
           fill: {
             rgb: "F4B183",

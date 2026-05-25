@@ -13,4 +13,9 @@ allowBuilds:
   esbuild: true
   sharp: true
   workerd: true
-minimumReleaseAgeExclude: mindoodb-app-sdk
+minimumReleaseAgeExclude:
+  - mindoodb
+  - mindoodb-app-sdk
+  - mindoodb-view-language
+  - "@eigenpal/docx-editor-core"
+  - "@eigenpal/docx-editor-vue"
