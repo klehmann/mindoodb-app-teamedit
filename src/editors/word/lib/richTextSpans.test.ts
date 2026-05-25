@@ -72,6 +72,48 @@ describe("richTextSpans", () => {
     ).toEqual(["A1", "A2"]);
   });
 
+  it("preserves resolved table cell backgrounds from themed DOCX shading", () => {
+    const cell = schema.nodes.tableCell.create(
+      {
+        backgroundColor: "F4B183",
+        _originalResolvedFill: "F4B183",
+        _originalFormatting: {
+          shading: {
+            fill: {
+              themeColor: "accent2",
+              themeTint: "99",
+            },
+            pattern: "clear",
+          },
+        },
+      },
+      [schema.nodes.paragraph.create(null, schema.text("Themed"))],
+    );
+    const row = schema.nodes.tableRow.create(null, [cell]);
+    const table = schema.nodes.table.create(null, [row]);
+    const proseDoc = schema.nodes.doc.create(null, [table]);
+    const spans = pmNodeToSdkRichTextSpans(adapter, proseDoc);
+
+    const roundTripped = richTextSpansToDocument(spans, []);
+    const roundTrippedSpans = documentToRichTextSpans(roundTripped);
+    const cellSpan = roundTrippedSpans.find((span) =>
+      span.type === "block" &&
+      (span.value.type as { value?: string }).value === "tableCell"
+    );
+
+    expect(cellSpan?.type).toBe("block");
+    if (cellSpan?.type === "block") {
+      expect(cellSpan.value.attrs?.backgroundColor).toBe("F4B183");
+      expect(cellSpan.value.attrs?._originalFormatting).toMatchObject({
+        shading: {
+          fill: {
+            rgb: "F4B183",
+          },
+        },
+      });
+    }
+  });
+
   it("attachCommentsToDocument clones proxy-like comment arrays", () => {
     const document = createDefaultWordDocument();
     const comments = new Proxy([{ id: 1, text: "Review this paragraph" }], {});

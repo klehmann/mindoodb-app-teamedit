@@ -106,10 +106,33 @@ function prefixBlockParents(spans: NativeSpan[], parents: string[]): NativeSpan[
 
 function serializableNodeAttrs(node: ProseMirrorNode): Record<string, A.MaterializeValue> {
   const attrs = sanitizeMaterializeValue(
-    Object.fromEntries(Object.entries(node.attrs).filter(([, value]) => value !== null)),
+    normalizeNodeAttrsForStorage(node),
   );
 
   return isRecord(attrs) ? (attrs as Record<string, A.MaterializeValue>) : {};
+}
+
+function normalizeNodeAttrsForStorage(node: ProseMirrorNode): Record<string, unknown> {
+  const attrs = Object.fromEntries(Object.entries(node.attrs).filter(([, value]) => value !== null));
+  if ((node.type.name !== "tableCell" && node.type.name !== "tableHeader") || typeof attrs.backgroundColor !== "string") {
+    return attrs;
+  }
+
+  const originalFormatting = attrs._originalFormatting;
+  if (!isRecord(originalFormatting)) {
+    return attrs;
+  }
+
+  return {
+    ...attrs,
+    _originalFormatting: {
+      ...originalFormatting,
+      shading: {
+        ...(isRecord(originalFormatting.shading) ? originalFormatting.shading : {}),
+        fill: { rgb: attrs.backgroundColor },
+      },
+    },
+  };
 }
 
 function normalizeNativeSpans(spans: NativeSpan[], context: string): NativeSpan[] {
