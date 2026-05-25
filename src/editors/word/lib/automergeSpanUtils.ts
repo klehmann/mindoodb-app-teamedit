@@ -114,7 +114,10 @@ function serializableNodeAttrs(node: ProseMirrorNode): Record<string, A.Material
 
 function normalizeNodeAttrsForStorage(node: ProseMirrorNode): Record<string, unknown> {
   const attrs = Object.fromEntries(Object.entries(node.attrs).filter(([, value]) => value !== null));
-  if ((node.type.name !== "tableCell" && node.type.name !== "tableHeader") || typeof attrs.backgroundColor !== "string") {
+  if (
+    (node.type.name !== "tableCell" && node.type.name !== "tableHeader") ||
+    typeof attrs.backgroundColor !== "string"
+  ) {
     return attrs;
   }
 
