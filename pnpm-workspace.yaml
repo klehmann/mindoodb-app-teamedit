@@ -13,3 +13,4 @@ allowBuilds:
   esbuild: true
   sharp: true
   workerd: true
+minimumReleaseAgeExclude: mindoodb-app-sdk
