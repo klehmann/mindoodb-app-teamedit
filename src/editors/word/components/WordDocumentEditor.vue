@@ -85,7 +85,6 @@ async function handleUpdateDocument(document: unknown) {
   }
   await nextTick();
   const nextDocument = readCurrentEditorDocument(document);
-  applyCommentAuthor(nextDocument);
   if (isHydrating.value) {
     documentModel.value = nextDocument;
     return;
@@ -114,37 +113,7 @@ function cloneWordDocument(document: DocxDocument) {
   return structuredClone(document) as DocxDocument;
 }
 
-function applyCommentAuthor(document: DocxDocument) {
-  const author = props.author?.trim();
-  if (!author) {
-    return;
-  }
-  const comments = commentsFromWordDocument(document);
-  let changed = false;
-  const authoredComments = comments.map((comment) => {
-    if (!comment || typeof comment !== "object") {
-      return comment;
-    }
-    const currentAuthor = (comment as { author?: unknown }).author;
-    if (currentAuthor && currentAuthor !== "User") {
-      return comment;
-    }
-    changed = true;
-    return {
-      ...comment,
-      author,
-    };
-  });
-  if (changed) {
-    attachCommentsToDocument(document, authoredComments);
-  }
-}
-
 async function saveDocx() {
-  const document = editorRef.value?.getDocument?.() as DocxDocument | null | undefined;
-  if (document) {
-    applyCommentAuthor(document);
-  }
   const saved = await editorRef.value?.save?.() as ArrayBuffer | Blob | null | undefined;
   if (!saved) {
     return null;
@@ -276,6 +245,7 @@ defineExpose({
       :key="editorInstanceKey"
       ref="editorRef"
       :document="documentModel"
+      :author="author"
       :mode="readonly ? 'viewing' : 'editing'"
       :read-only="readonly"
       :show-toolbar="!readonly"
