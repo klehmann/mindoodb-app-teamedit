@@ -84,11 +84,15 @@ async function handleUpdateDocument(document: unknown) {
     return;
   }
   await nextTick();
-  const nextDocument = readCurrentEditorDocument(document);
+  // While hydrating, the editor echoes its parsed document back via
+  // `update:document` (docx-editor >= 1.5.0). Assigning that echo to
+  // `documentModel` would mutate the `:document` prop and re-trigger the
+  // editor's loader, which echoes again with a fresh object reference -
+  // an unbounded microtask loop that freezes the tab. Drop the echo instead.
   if (isHydrating.value) {
-    documentModel.value = nextDocument;
     return;
   }
+  const nextDocument = readCurrentEditorDocument(document);
   emit("change", nextDocument);
 }
 

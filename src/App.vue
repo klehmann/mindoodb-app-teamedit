@@ -167,6 +167,22 @@ const { updateAvailable, updateReloading, reloadForUpdate } =
 // one editor surface is active, matching TeamGrid's Window menu model.
 const session = ref<MindooDBAppSession | null>(null);
 const currentUserName = ref("User");
+
+/**
+ * Convert a canonical (X.500) name such as `cn=Test/o=ACME` to its abbreviated
+ * form (`Test/ACME`) by dropping the component type prefixes (`cn=`, `ou=`,
+ * `o=`, `c=`, ...). Values without prefixes are passed through unchanged.
+ */
+function abbreviateUserName(name: string | null | undefined): string {
+  if (!name) {
+    return "";
+  }
+  return name
+    .split("/")
+    .map((component) => component.replace(/^\s*[a-z]+\s*=\s*/i, "").trim())
+    .filter((component) => component.length > 0)
+    .join("/");
+}
 const launchTimeTravelDate = ref<number | null>(null);
 const databases = ref<MindooDBAppDatabaseInfo[]>([]);
 const selectedDatabaseId = ref("");
@@ -663,7 +679,7 @@ onMounted(async () => {
     const nextSession = await bridge.connect();
     session.value = nextSession;
     const context = await nextSession.getLaunchContext();
-    currentUserName.value = context.user.username || "User";
+    currentUserName.value = abbreviateUserName(context.user.username) || "User";
     launchTimeTravelDate.value = context.timeTravelDate ?? null;
     applyAppTheme(context.theme);
     cleanupTheme = nextSession.onThemeChange((theme) => applyAppTheme(theme));
@@ -2813,7 +2829,7 @@ function formatRevisionDate(timestamp: number) {
 .toolbar {
   position: sticky;
   top: 2px;
-  z-index: 24;
+  z-index: 101;
   padding: 1px 0.55rem 1px 4px;
   display: flex;
   align-items: center;
