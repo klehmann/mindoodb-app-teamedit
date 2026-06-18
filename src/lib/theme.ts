@@ -1,5 +1,6 @@
 import { Theme, definePreset } from "@primeuix/styled";
 import Aura from "@primeuix/themes/aura";
+import { ref, type Ref } from "vue";
 
 import type { MindooDBAppHostTheme, MindooDBAppThemeMode } from "mindoodb-app-sdk";
 
@@ -33,6 +34,13 @@ const MINDOO_THEME_PRESET = definePreset(Aura, {
 export const DEFAULT_THEME_PRESET = "mindoo";
 export const DEFAULT_THEME_MODE: MindooDBAppThemeMode = "dark";
 
+/**
+ * Reactive mirror of the host theme mode. Updated by `applyAppTheme` whenever the
+ * Haven host pushes a `theme-changed` event, so components (e.g. the DocxEditor's
+ * `colorMode`) can stay in sync with light/dark mode without re-reading the DOM.
+ */
+export const themeMode: Ref<MindooDBAppThemeMode> = ref(DEFAULT_THEME_MODE);
+
 export function buildPrimeVueTheme() {
   return {
     preset: MINDOO_THEME_PRESET,
@@ -44,6 +52,7 @@ export function buildPrimeVueTheme() {
 
 export function applyAppTheme(theme?: Partial<MindooDBAppHostTheme> | null) {
   const mode = theme?.mode === "light" ? "light" : DEFAULT_THEME_MODE;
+  themeMode.value = mode;
   if (typeof document !== "undefined") {
     document.documentElement.dataset.theme = mode;
     document.documentElement.dataset.themePreset = DEFAULT_THEME_PRESET;

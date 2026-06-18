@@ -10,6 +10,7 @@ import {
   commentsFromWordDocument,
   createDefaultWordDocument,
 } from "@/editors/word/lib/richTextSpans";
+import { themeMode } from "@/lib/theme";
 
 const DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const DOCX_FILE_MENU_SELECTOR = ".menu-bar > .docx-popover:first-child";
@@ -253,6 +254,7 @@ defineExpose({
       :mode="readonly ? 'viewing' : 'editing'"
       :read-only="readonly"
       :show-toolbar="!readonly"
+      :color-mode="themeMode"
       @update:document="handleUpdateDocument"
       @change="handleUpdateDocument"
       @ready="handleReady"
