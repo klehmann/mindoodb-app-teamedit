@@ -1,7 +1,12 @@
+import MarkdownIt from "markdown-it";
 import type { MindooDBAppAttachmentPreviewOptions, MindooDBAppDatabase } from "mindoodb-app-sdk";
 
 const ATTACHMENT_MARKDOWN_SCHEME = "mindoodb-attachment:";
 const DEFAULT_CHUNK_SIZE = 64 * 1024;
+const markdownImageParser = new MarkdownIt({
+  html: false,
+  linkify: false,
+});
 
 /**
  * Payload returned by the attachment picker when the user inserts an existing
@@ -28,7 +33,9 @@ export function isAttachmentMarkdownUrl(url: string) {
  * URLs are only valid in the current browser session.
  */
 export function createAttachmentMarkdownUrl(attachmentName: string) {
-  return `${ATTACHMENT_MARKDOWN_SCHEME}${encodeURIComponent(attachmentName)}`;
+  const encodedName = encodeURIComponent(attachmentName).replace(/[!'()*]/g, (character) =>
+    `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+  return `${ATTACHMENT_MARKDOWN_SCHEME}${encodedName}`;
 }
 
 /** Decodes a TeamEdit attachment markdown URL back to the stored attachment name. */
@@ -118,13 +125,21 @@ export async function readAttachmentBlob(
 /** Extracts TeamEdit attachment image URLs from markdown so previews can preload them. */
 export function extractAttachmentMarkdownUrls(markdown: string) {
   const urls = new Set<string>();
-  const markdownImagePattern = /!\[[^\]]*]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
-  let match: RegExpExecArray | null;
-  while ((match = markdownImagePattern.exec(markdown)) !== null) {
-    const url = match[1];
-    if (url && isAttachmentMarkdownUrl(url)) {
-      urls.add(url);
+
+  function visitToken(token: ReturnType<typeof markdownImageParser.parse>[number]) {
+    if (token.type === "image") {
+      const url = token.attrGet("src");
+      if (url && isAttachmentMarkdownUrl(url)) {
+        urls.add(url);
+      }
     }
+    for (const child of token.children ?? []) {
+      visitToken(child);
+    }
+  }
+
+  for (const token of markdownImageParser.parse(markdown, {})) {
+    visitToken(token);
   }
   return [...urls];
 }

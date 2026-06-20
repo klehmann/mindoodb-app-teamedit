@@ -336,6 +336,27 @@ async function waitForImages(document: Document, timeoutMs = 1500) {
     })));
 }
 
+async function blobToDataUrl(blob: Blob) {
+  return await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error ?? new Error("Unable to read image for print."));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function inlineBlobImages(document: Document) {
+  const images = Array.from(document.images).filter((image) => image.src.startsWith("blob:"));
+  await Promise.all(images.map(async (image) => {
+    try {
+      image.src = await blobToDataUrl(await fetch(image.src).then((response) => response.blob()));
+    } catch {
+      // Leave the original URL in place; the existing load/error wait below will
+      // still let printing continue if the browser can resolve it on its own.
+    }
+  }));
+}
+
 async function waitForPrintAssets(document: Document) {
   await Promise.all([
     "fonts" in document ? document.fonts.ready.catch(() => undefined) : undefined,
@@ -355,6 +376,7 @@ export async function renderAndPrintMarkdownWindow(printWindow: Window, options:
   await renderMermaidPlaceholders(printWindow.document, {
     idPrefix: "teamedit-print-mermaid",
   });
+  await inlineBlobImages(printWindow.document);
   // Set up ratio scaling listeners up front so each image is resized as soon
   // as it loads. waitForPrintAssets() below resolves only after every image
   // has fired its load/error event, by which point the heights are in place.

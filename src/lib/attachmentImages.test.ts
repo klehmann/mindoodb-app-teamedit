@@ -20,6 +20,12 @@ describe("attachmentImages", () => {
     expect(parseAttachmentMarkdownUrl("https://example.com/image.png")).toBeNull();
   });
 
+  it("encodes markdown-sensitive attachment filename characters", () => {
+    const url = createAttachmentMarkdownUrl("teamedit-images/photo (final)!.png");
+    expect(url).toBe("mindoodb-attachment:teamedit-images%2Fphoto%20%28final%29%21.png");
+    expect(parseAttachmentMarkdownUrl(url)).toBe("teamedit-images/photo (final)!.png");
+  });
+
   it("sanitizes file names without hiding the original extension", () => {
     expect(sanitizeAttachmentFileName("../photo one.png")).toBe("..-photo one.png");
     expect(sanitizeAttachmentFileName("")).toBe("attachment");
@@ -31,6 +37,11 @@ describe("attachmentImages", () => {
     const second = createAttachmentMarkdownUrl("two.png");
     expect(extractAttachmentMarkdownUrls(`![one](${first})\n![remote](https://example.com/x.png)\n![two](${second} "Two")`))
       .toEqual([first, second]);
+  });
+
+  it("extracts legacy image URLs that contain raw balanced parentheses", () => {
+    const legacyUrl = "mindoodb-attachment:teamedit-images%2Fphoto%20(1).png";
+    expect(extractAttachmentMarkdownUrls(`![legacy](${legacyUrl})`)).toEqual([legacyUrl]);
   });
 
   it("formats attachment sizes for compact display", () => {
