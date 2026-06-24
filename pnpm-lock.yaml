@@ -15,11 +15,11 @@ importers:
         specifier: ^0.2.0
         version: 0.2.0
       '@eigenpal/docx-editor-core':
-        specifier: ^1.8.2
-        version: 1.8.2(prosemirror-commands@1.7.1)(prosemirror-dropcursor@1.8.2)(prosemirror-history@1.5.0)(prosemirror-keymap@1.2.3)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-tables@1.8.5)(prosemirror-transform@1.12.0)(prosemirror-view@1.41.8)
+        specifier: ^1.9.0
+        version: 1.9.0(prosemirror-commands@1.7.1)(prosemirror-dropcursor@1.8.2)(prosemirror-history@1.5.0)(prosemirror-keymap@1.2.3)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-tables@1.8.5)(prosemirror-transform@1.12.0)(prosemirror-view@1.41.8)
       '@eigenpal/docx-editor-vue':
-        specifier: ^1.8.2
-        version: 1.8.2(prosemirror-commands@1.7.1)(prosemirror-dropcursor@1.8.2)(prosemirror-history@1.5.0)(prosemirror-keymap@1.2.3)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-tables@1.8.5)(prosemirror-transform@1.12.0)(prosemirror-view@1.41.8)(vue@3.5.34(typescript@6.0.3))
+        specifier: ^1.9.0
+        version: 1.9.0(prosemirror-commands@1.7.1)(prosemirror-dropcursor@1.8.2)(prosemirror-history@1.5.0)(prosemirror-keymap@1.2.3)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-tables@1.8.5)(prosemirror-transform@1.12.0)(prosemirror-view@1.41.8)(vue@3.5.34(typescript@6.0.3))
       '@fontsource/inter':
         specifier: ^5.2.8
         version: 5.2.8
@@ -870,8 +870,8 @@ packages:
     resolution: {integrity: sha512-QxULHAm7cNu72w97JUNCBFODFaXpbDg+dP8b/oWFAZ2MTRppA3U00Y2L1HqaS4J6yBqxwa/Y3nMBaxVKbB/NsA==}
     engines: {node: '>=20.19.0'}
 
-  '@eigenpal/docx-editor-agents@1.8.2':
-    resolution: {integrity: sha512-UZe9kZFtpF9Yk/AiExJOp58mvDuDbSQeVclYXuKx7omZ1EQsQqQ2ho76k/zl1vKsmPUSEx9hkWF0Ff1O1+JWug==}
+  '@eigenpal/docx-editor-agents@1.9.0':
+    resolution: {integrity: sha512-Uz+xl/eBndrSanVUm4icb8WHNPGQDvRg9AXEmnP3L9s8GW2iZnNREA4ZQ1ZEcQtvcXwDyH/PueUVDzgAR1cgMw==}
     peerDependencies:
       '@ai-sdk/vue': ^2.0.0
       ai: ^5.0.0 || ^6.0.0
@@ -887,8 +887,8 @@ packages:
       vue:
         optional: true
 
-  '@eigenpal/docx-editor-core@1.8.2':
-    resolution: {integrity: sha512-o0/XPzoorZBHZNqv7nmgSxG21IpV50fU6NgxpMbGz9Ws6kDUwgh6/q3w9sw0THhEEPy4LGtQzqvvR2PIQv0phA==}
+  '@eigenpal/docx-editor-core@1.9.0':
+    resolution: {integrity: sha512-qKbpJA1Td6koTMbz+7Z9zjaXOG/k203FiKpyUJTT1rXx9iBw4XWM9E6cMBnt8Fq1M/M6vSdkAnQ+XBtLVAtxVQ==}
     hasBin: true
     peerDependencies:
       prosemirror-commands: ^1.5.2
@@ -901,11 +901,11 @@ packages:
       prosemirror-transform: ^1.12.0
       prosemirror-view: ^1.32.7
 
-  '@eigenpal/docx-editor-i18n@1.8.2':
-    resolution: {integrity: sha512-XrVE1sRNpY/jNyFY1dUIa+fGmH+/Dg75jT+39Rbe7M6oegrX9gHsGKSSrPv1GgAy4aErvjACGAZWrbQildLO2g==}
+  '@eigenpal/docx-editor-i18n@1.9.0':
+    resolution: {integrity: sha512-sstwCP47XMRX63NVrfINCXfsPvrJeUMxePKakhEXGJwl+Hem5cWTzX/Gc0AhRi1UIA1OW1t9akkiXIbo79RJyw==}
 
-  '@eigenpal/docx-editor-vue@1.8.2':
-    resolution: {integrity: sha512-kBhU3lWv+Ii0ybBGZAb6okdq1XEcUzawktDjHbMt23Cq/3JaUs/3auhi5t8WfcE/XIpghl5PrYovm6wHvpbmUA==}
+  '@eigenpal/docx-editor-vue@1.9.0':
+    resolution: {integrity: sha512-CXeugwFzNr+ufw8dWwwSq0axtfPWFfFwsgMfGDLUi5hMLR0ujewPvBWjCchBh6xeJGLT6eKqB2hrkQJBvp9x8A==}
     peerDependencies:
       prosemirror-commands: ^1.5.2
       prosemirror-dropcursor: ^1.8.2
@@ -5192,7 +5192,7 @@ snapshots:
 
   '@csstools/css-tokenizer@4.0.0': {}
 
-  '@eigenpal/docx-editor-agents@1.8.2(vue@3.5.34(typescript@6.0.3))':
+  '@eigenpal/docx-editor-agents@1.9.0(vue@3.5.34(typescript@6.0.3))':
     dependencies:
       docxtemplater: 3.68.7
       jszip: 3.10.1
@@ -5201,9 +5201,10 @@ snapshots:
     optionalDependencies:
       vue: 3.5.34(typescript@6.0.3)
 
-  '@eigenpal/docx-editor-core@1.8.2(prosemirror-commands@1.7.1)(prosemirror-dropcursor@1.8.2)(prosemirror-history@1.5.0)(prosemirror-keymap@1.2.3)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-tables@1.8.5)(prosemirror-transform@1.12.0)(prosemirror-view@1.41.8)':
+  '@eigenpal/docx-editor-core@1.9.0(prosemirror-commands@1.7.1)(prosemirror-dropcursor@1.8.2)(prosemirror-history@1.5.0)(prosemirror-keymap@1.2.3)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-tables@1.8.5)(prosemirror-transform@1.12.0)(prosemirror-view@1.41.8)':
     dependencies:
       docxtemplater: 3.68.7
+      dompurify: 3.4.2
       jszip: 3.10.1
       pizzip: 3.2.0
       prosemirror-commands: 1.7.1
@@ -5217,13 +5218,13 @@ snapshots:
       prosemirror-view: 1.41.8
       xml-js: 1.6.11
 
-  '@eigenpal/docx-editor-i18n@1.8.2': {}
+  '@eigenpal/docx-editor-i18n@1.9.0': {}
 
-  '@eigenpal/docx-editor-vue@1.8.2(prosemirror-commands@1.7.1)(prosemirror-dropcursor@1.8.2)(prosemirror-history@1.5.0)(prosemirror-keymap@1.2.3)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-tables@1.8.5)(prosemirror-transform@1.12.0)(prosemirror-view@1.41.8)(vue@3.5.34(typescript@6.0.3))':
+  '@eigenpal/docx-editor-vue@1.9.0(prosemirror-commands@1.7.1)(prosemirror-dropcursor@1.8.2)(prosemirror-history@1.5.0)(prosemirror-keymap@1.2.3)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-tables@1.8.5)(prosemirror-transform@1.12.0)(prosemirror-view@1.41.8)(vue@3.5.34(typescript@6.0.3))':
     dependencies:
-      '@eigenpal/docx-editor-agents': 1.8.2(vue@3.5.34(typescript@6.0.3))
-      '@eigenpal/docx-editor-core': 1.8.2(prosemirror-commands@1.7.1)(prosemirror-dropcursor@1.8.2)(prosemirror-history@1.5.0)(prosemirror-keymap@1.2.3)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-tables@1.8.5)(prosemirror-transform@1.12.0)(prosemirror-view@1.41.8)
-      '@eigenpal/docx-editor-i18n': 1.8.2
+      '@eigenpal/docx-editor-agents': 1.9.0(vue@3.5.34(typescript@6.0.3))
+      '@eigenpal/docx-editor-core': 1.9.0(prosemirror-commands@1.7.1)(prosemirror-dropcursor@1.8.2)(prosemirror-history@1.5.0)(prosemirror-keymap@1.2.3)(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)(prosemirror-tables@1.8.5)(prosemirror-transform@1.12.0)(prosemirror-view@1.41.8)
+      '@eigenpal/docx-editor-i18n': 1.9.0
       prosemirror-commands: 1.7.1
       prosemirror-dropcursor: 1.8.2
       prosemirror-history: 1.5.0
