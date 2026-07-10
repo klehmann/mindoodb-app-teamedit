@@ -13,6 +13,7 @@ import Button from "primevue/button";
 import Dialog from "primevue/dialog";
 import Menubar from "primevue/menubar";
 import Message from "primevue/message";
+import SplitButton from "primevue/splitbutton";
 import Splitter from "primevue/splitter";
 import SplitterPanel from "primevue/splitterpanel";
 import type { MenuItem } from "primevue/menuitem";
@@ -209,6 +210,7 @@ const viewingHistoricalSnapshot = ref<MindooDBAppHistoricalDocument | null>(
 const currentRuntime = ref<MindooDBAppRuntime>("iframe");
 const hostUiPreferences = ref<MindooDBAppUiPreferences>({
   iosMultitaskingOptimized: false,
+  reduceMotion: false,
 });
 
 // The editor always works with a local markdown string. The text buffer mirrors
@@ -707,6 +709,7 @@ onBeforeUnmount(async () => {
     clearTimeout(snapshotActiveSessionTimer);
     snapshotActiveSessionTimer = null;
   }
+  stopLivePolling();
   teardownWordAutomergeHandle();
   cleanupTheme?.();
   cleanupUiPreferences?.();
@@ -1311,6 +1314,169 @@ async function openSelectedDocument() {
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
   }
+}
+
+/* --- Live collaboration -------------------------------------------------- */
+
+/**
+ * How often the open editor re-checks Haven for changes made by other
+ * devices/users while auto-refresh is enabled. Remote changes are merged via
+ * the same reconcile paths the save flow uses (text buffer / Automerge
+ * handle), so a poll tick never clobbers local work: it is skipped entirely
+ * while there are unsaved local edits.
+ */
+const LIVE_POLL_INTERVAL_MS = 4000;
+const AUTO_REFRESH_STORAGE_KEY = "mindoodb-teamedit-auto-refresh";
+let livePollTimer: ReturnType<typeof setInterval> | null = null;
+let livePolling = false;
+
+/**
+ * Opt-in live collaboration, toggled via the refresh split button's dropdown.
+ * Off by default; persisted per device so the choice survives reloads.
+ */
+const autoRefreshEnabled = ref(readAutoRefreshPreference());
+
+const refreshMenuItems = computed<MenuItem[]>(() => [
+  {
+    label: "Auto-refresh",
+    icon: autoRefreshEnabled.value ? "pi pi-check" : "pi pi-circle",
+    command: () => {
+      autoRefreshEnabled.value = !autoRefreshEnabled.value;
+    },
+  },
+]);
+
+function readAutoRefreshPreference(): boolean {
+  if (typeof localStorage === "undefined") {
+    return false;
+  }
+  return localStorage.getItem(AUTO_REFRESH_STORAGE_KEY) === "1";
+}
+
+function startLivePolling() {
+  stopLivePolling();
+  livePollTimer = setInterval(() => {
+    void pollCurrentDocumentForRemoteChanges();
+  }, LIVE_POLL_INTERVAL_MS);
+}
+
+function stopLivePolling() {
+  if (livePollTimer) {
+    clearInterval(livePollTimer);
+    livePollTimer = null;
+  }
+}
+
+watch(
+  autoRefreshEnabled,
+  (enabled) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(AUTO_REFRESH_STORAGE_KEY, enabled ? "1" : "0");
+    }
+    if (enabled) {
+      startLivePolling();
+    } else {
+      stopLivePolling();
+    }
+  },
+  { immediate: true },
+);
+
+/**
+ * Live-collaboration poll: pull the merged server state for the open document
+ * into the editor between saves. Skips whenever auto-refresh is disabled, the
+ * user has unsaved local edits, a historical revision or time travel view is
+ * active, or the tab is hidden. Best-effort: failures are swallowed and
+ * retried on the next tick.
+ */
+async function pollCurrentDocumentForRemoteChanges(): Promise<void> {
+  if (!autoRefreshEnabled.value || livePolling) {
+    return;
+  }
+  if (typeof document !== "undefined" && document.hidden) {
+    return;
+  }
+  if (!currentDatabase.value || !currentDocument.value) {
+    return;
+  }
+  if (hasLocalEdits.value || editorReadOnly.value) {
+    return;
+  }
+  livePolling = true;
+  try {
+    if (isWordDocument.value) {
+      await pollWordRemote();
+    } else {
+      await pollMarkdownRemote();
+    }
+  } catch {
+    // Ignore; live polling is best-effort and retries next interval.
+  } finally {
+    livePolling = false;
+  }
+}
+
+/** Adopt merged markdown text from Haven while the editor is idle. */
+async function pollMarkdownRemote(): Promise<void> {
+  const buffer = textBuffer.value;
+  const database = currentDatabase.value;
+  const documentId = currentDocument.value?.id;
+  if (!buffer || buffer.dirty || !database || !documentId) {
+    return;
+  }
+  const fresh = await database.documents.get(documentId);
+  if (!fresh) {
+    return;
+  }
+  const changed = buffer.reconcile(fresh);
+  currentDocument.value = fresh;
+  adoptRemoteMetadata(fresh);
+  if (changed) {
+    suppressEditorUpdate = true;
+    markdown.value = buffer.value;
+    queueMicrotask(() => {
+      suppressEditorUpdate = false;
+    });
+  }
+}
+
+/**
+ * Reload the Word Automerge replica from Haven while the editor is idle. The
+ * handle's change listener rebuilds the visible editor document only when the
+ * merged spans actually differ.
+ */
+async function pollWordRemote(): Promise<void> {
+  const handle = wordAutomergeHandle.value;
+  const database = currentDatabase.value;
+  const documentId = currentDocument.value?.id;
+  if (!handle || handle.dirty || !database || !documentId) {
+    return;
+  }
+  const fresh = await database.documents.get(documentId);
+  if (!fresh) {
+    return;
+  }
+  // Update the document first so the handle's change listener picks up the
+  // latest comments alongside the reconciled spans.
+  currentDocument.value = fresh;
+  adoptRemoteMetadata(fresh);
+  handle.syncDocument(fresh);
+  const snapshot = await handle.refresh();
+  handle.reconcile(fresh, snapshot);
+}
+
+/**
+ * Mirror remotely changed metadata (subject/tags/template flag) into the
+ * editor. Only called from the poll, which already guarantees there are no
+ * local edits, so overwriting the drafts is safe.
+ */
+function adoptRemoteMetadata(document: MindooDBAppDocument) {
+  savedSubject.value = readSubject(document);
+  subject.value = savedSubject.value;
+  savedTags.value = readTags(document);
+  tags.value = [...savedTags.value];
+  savedIsTemplate.value = readIsTemplate(document);
+  isTemplate.value = savedIsTemplate.value;
 }
 
 /** Ask before discarding local edits, otherwise refresh immediately. */
@@ -2270,23 +2436,25 @@ function formatRevisionDate(timestamp: number) {
           :disabled="!canSave"
           @click="saveFile"
         />
-        <Button
+        <SplitButton
           :icon="isViewingHistorical ? 'pi pi-history' : 'pi pi-refresh'"
           text
-          rounded
           severity="secondary"
-          class="toolbar__icon-button"
-          :aria-label="
-            isViewingHistorical
-              ? 'Return to current version'
-              : 'Refresh document'
-          "
-          :title="
-            isViewingHistorical
-              ? 'Return to current version'
-              : 'Refresh document'
-          "
+          class="toolbar__refresh-split"
+          :model="refreshMenuItems"
           :disabled="!canRefresh"
+          :button-props="{
+            'aria-label': isViewingHistorical
+              ? 'Return to current version'
+              : 'Refresh document',
+            title: isViewingHistorical
+              ? 'Return to current version'
+              : 'Refresh document',
+          }"
+          :menu-button-props="{
+            'aria-label': 'Refresh options',
+            title: 'Refresh options',
+          }"
           @click="requestRefreshCurrentDocument"
         />
       </div>
@@ -2872,6 +3040,23 @@ function formatRevisionDate(timestamp: number) {
 .toolbar__icon-button {
   flex: 0 0 auto;
   width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+}
+
+/* Icon-only split button: square refresh action + narrow dropdown arrow. */
+.toolbar__refresh-split {
+  flex: 0 0 auto;
+}
+
+:deep(.toolbar__refresh-split .p-splitbutton-button) {
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+}
+
+:deep(.toolbar__refresh-split .p-splitbutton-dropdown) {
+  width: 1.3rem;
   height: 1.9rem;
   padding: 0;
 }
