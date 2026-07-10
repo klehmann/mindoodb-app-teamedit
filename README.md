@@ -379,4 +379,3 @@ The collaborative text editing flow is covered end-to-end by the SDK and Haven t
 TeamEdit is released under the [Apache License 2.0](./LICENSE). See the [`LICENSE`](./LICENSE) file for the full text.
 
 Copyright (c) 2026 Mindoo GmbH.
-
