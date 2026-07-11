@@ -71,8 +71,8 @@ importers:
         specifier: ^11.14.0
         version: 11.15.0
       mindoodb-app-sdk:
-        specifier: 0.0.28
-        version: 0.0.28(@automerge/automerge@3.2.6)
+        specifier: 0.0.31
+        version: 0.0.31(@automerge/automerge@3.2.6)
       mindoodb-view-language:
         specifier: 0.0.14
         version: 0.0.14
@@ -3215,8 +3215,8 @@ packages:
   micromark@4.0.2:
     resolution: {integrity: sha512-zpe98Q6kvavpCr1NPVSCMebCKfD7CA2NqZ+rykeNhONIJBpc1tFKt9hucLGwha3jNTNI8lHpctWJWoimVF4PfA==}
 
-  mindoodb-app-sdk@0.0.28:
-    resolution: {integrity: sha512-IwGE0VEQm1pEgtFQVJFWgmM2hvQsEjMts7d/CQVEWr9Xc8/9rCW1d/a5UEwraBlXkb5+UqrBlJ3FswS6iHhDHQ==}
+  mindoodb-app-sdk@0.0.31:
+    resolution: {integrity: sha512-VGdpYWPhB6YFxZXuyjYGqrSn2ruALoiCAHe8KOHIT4EUk7Y54VfHPc5UUus8h6iUEFHBYz05iQ611i4nvMC0nA==}
     engines: {node: '>=22.13.0'}
     peerDependencies:
       '@automerge/automerge': ^3.2.1
@@ -7938,7 +7938,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  mindoodb-app-sdk@0.0.28(@automerge/automerge@3.2.6):
+  mindoodb-app-sdk@0.0.31(@automerge/automerge@3.2.6):
     dependencies:
       mindoodb-view-language: 0.0.14
     optionalDependencies:
