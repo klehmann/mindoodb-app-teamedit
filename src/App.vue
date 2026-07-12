@@ -160,7 +160,7 @@ function readPreviewPaneSettings() {
 }
 
 const previewPaneSettings = readPreviewPaneSettings();
-const { updateAvailable, updateReloading, reloadForUpdate } =
+const { updateAvailable, updateReloading, reloadForUpdate, dismissUpdate } =
   useTeamEditAppUpdate();
 
 // Bridge/session state is kept in this root component because TeamEdit is a
@@ -2396,8 +2396,9 @@ function formatRevisionDate(timestamp: number) {
     <Message
       v-if="updateAvailable"
       severity="warn"
-      :closable="false"
+      :closable="true"
       class="app-update-banner"
+      @close="dismissUpdate"
     >
       <div class="app-update-banner__content">
         <div class="app-update-banner__copy">
