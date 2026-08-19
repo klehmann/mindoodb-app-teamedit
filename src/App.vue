@@ -74,6 +74,15 @@ import {
 } from "@/lib/exportMarkdown";
 import { applyImageRatios } from "@/lib/imageRatio";
 import {
+  createRecentDocumentsStorageKey,
+  formatRecentDocumentMenuLabel,
+  readRecentDocumentsFromStorage,
+  rememberRecentDocument,
+  removeRecentDocument,
+  writeRecentDocumentsToStorage,
+  type RecentDocumentEntry,
+} from "@/lib/recentDocuments";
+import {
   createMarkdownRenderer,
   normalizeMarkdownForRendering,
 } from "@/lib/markdownRendering";
@@ -183,6 +192,10 @@ const { updateAvailable, updateReloading, reloadForUpdate, dismissUpdate } =
 const session = ref<MindooDBAppSession | null>(null);
 const currentUserName = ref(t("app.userFallback"));
 const currentUserCanonical = ref("");
+const currentAppId = ref("");
+const currentTenantId = ref("");
+const currentUserId = ref("");
+const recentDocuments = ref<RecentDocumentEntry[]>([]);
 
 /**
  * Convert a canonical (X.500) name such as `cn=Test/o=ACME` to its abbreviated
@@ -250,7 +263,6 @@ const status = ref(t("app.status.connecting"));
 const openDialogVisible = ref(false);
 const propertiesDialogVisible = ref(false);
 const refreshConfirmVisible = ref(false);
-const infoDialogVisible = ref(false);
 const deleteConfirmVisible = ref(false);
 const closeConfirmVisible = ref(false);
 const attachmentPickerVisible = ref(false);
@@ -304,6 +316,13 @@ let suppressEditorUpdate = false;
 
 const readableDatabases = computed(() =>
   databases.value.filter((database) => database.capabilities.includes("read")),
+);
+const recentDocumentsStorageKey = computed(() =>
+  createRecentDocumentsStorageKey({
+    appId: currentAppId.value,
+    tenantId: currentTenantId.value,
+    userId: currentUserId.value,
+  }),
 );
 const creatableDatabases = computed(() =>
   databases.value.filter((database) =>
@@ -535,6 +554,34 @@ const renderedMarkdown = computed(() => {
   return markdownIt.render(normalizeMarkdownForRendering(markdown.value || ""));
 });
 
+const recentDocumentsMenuItems = computed<MenuItem[]>(() => {
+  const untitled = t("common.untitled");
+  const documentItems: MenuItem[] = recentDocuments.value.length > 0
+    ? recentDocuments.value.map((entry) => ({
+        label: formatRecentDocumentMenuLabel(entry.title, untitled),
+        icon: entry.type === "word" ? "pi pi-file-word" : "pi pi-file",
+        command: () => {
+          void openRecentDocument(entry);
+        },
+      }))
+    : [{
+        label: t("app.menu.noRecentDocuments"),
+        disabled: true,
+      }];
+  return [
+    ...documentItems,
+    { separator: true },
+    {
+      label: t("app.menu.clearRecent"),
+      icon: "pi pi-times",
+      disabled: recentDocuments.value.length === 0,
+      command: () => {
+        clearRecentDocuments();
+      },
+    },
+  ];
+});
+
 const menuItems = computed<MenuItem[]>(() => [
   {
     label: t("app.menu.file"),
@@ -565,6 +612,12 @@ const menuItems = computed<MenuItem[]>(() => [
         },
       },
       {
+        label: t("app.menu.openRecent"),
+        icon: "pi pi-history",
+        disabled: !session.value,
+        items: recentDocumentsMenuItems.value,
+      },
+      {
         label: t("app.menu.save"),
         icon: "pi pi-save",
         disabled: !canSave.value,
@@ -577,8 +630,7 @@ const menuItems = computed<MenuItem[]>(() => [
         icon: "pi pi-info-circle",
         disabled: !canShowInfo.value,
         command: () => {
-          copiedInfoLabel.value = null;
-          infoDialogVisible.value = true;
+          openPropertiesDialog();
         },
       },
       {
@@ -716,6 +768,9 @@ onMounted(async () => {
     const nextSession = await bridge.connect();
     session.value = nextSession;
     const context = await nextSession.getLaunchContext();
+    currentAppId.value = context.appId ?? "";
+    currentTenantId.value = context.tenantId ?? "";
+    currentUserId.value = context.user.id ?? "";
     currentUserCanonical.value = context.user.username ?? "";
     currentUserName.value = abbreviateUserName(context.user.username) || t("app.userFallback");
     launchTimeTravelDate.value = context.timeTravelDate ?? null;
@@ -736,6 +791,9 @@ onMounted(async () => {
       readableDatabases.value[0]?.id ??
       context.databases[0]?.id ??
       "";
+    recentDocuments.value = readRecentDocumentsFromStorage(
+      recentDocumentsStorageKey.value,
+    );
     status.value = t("app.status.connected");
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
@@ -962,13 +1020,22 @@ async function disposeOpenNavigator() {
 }
 
 function openPropertiesDialog() {
-  if (!currentDocument.value || editorReadOnly.value) {
+  if (!currentDocument.value) {
     return;
   }
   resetPropertiesDraft();
   propertiesError.value = "";
+  copiedInfoLabel.value = null;
   propertiesDialogVisible.value = true;
-  void loadPropertiesDirectoryUsers();
+  if (!editorReadOnly.value) {
+    void loadPropertiesDirectoryUsers();
+  }
+}
+
+function closePropertiesDialog() {
+  propertiesDialogVisible.value = false;
+  copiedInfoLabel.value = null;
+  resetPropertiesDraft();
 }
 
 async function applyDocumentProperties() {
@@ -1016,6 +1083,7 @@ async function applyDocumentProperties() {
   tags.value = normalizeTags(propertiesTagsDraft.value.split(/\r?\n/));
   isTemplate.value = propertiesIsTemplateDraft.value;
   snapshotActiveSession();
+  persistCurrentDocumentInRecents();
   propertiesDialogVisible.value = false;
 }
 
@@ -1211,6 +1279,7 @@ function switchToOpenSession(sessionId: string) {
     return;
   }
   activateSession(session);
+  persistCurrentDocumentInRecents();
   status.value = t("app.status.switchedTo", {
     title: session.subject.trim() || session.documentId,
   });
@@ -1268,12 +1337,16 @@ function removeOpenSession(sessionId: string) {
  * be saved, and File/Open already hides the document.
  */
 function evictLostAccessSession(sessionId: string) {
-  if (!openDocumentSessions.value.some((candidate) => candidate.id === sessionId)) {
+  const session = openDocumentSessions.value.find(
+    (candidate) => candidate.id === sessionId,
+  );
+  if (!session) {
     return;
   }
   propertiesDialogVisible.value = false;
   closeConfirmVisible.value = false;
   pendingCloseSessionId.value = "";
+  dropRecentDocument(session.databaseId, session.documentId);
   removeOpenSession(sessionId);
   status.value = t("app.status.accessRevoked");
 }
@@ -1529,6 +1602,83 @@ async function openSelectedDocument() {
     }
     openDialogVisible.value = false;
     await disposeOpenNavigator();
+  } catch (error) {
+    status.value = error instanceof Error ? error.message : String(error);
+  }
+}
+
+function persistRecentDocument(entry: {
+  databaseId: string;
+  documentId: string;
+  title: string;
+  type: DocumentType;
+}) {
+  if (isTimeTravelActive.value) {
+    return;
+  }
+  recentDocuments.value = rememberRecentDocument(recentDocuments.value, entry);
+  const key = recentDocumentsStorageKey.value;
+  if (key) {
+    writeRecentDocumentsToStorage(key, recentDocuments.value);
+  }
+}
+
+function persistCurrentDocumentInRecents() {
+  if (!currentDatabaseId.value || !currentDocument.value) {
+    return;
+  }
+  persistRecentDocument({
+    databaseId: currentDatabaseId.value,
+    documentId: currentDocument.value.id,
+    title: subject.value.trim() || t("common.untitled"),
+    type: currentDocumentType.value,
+  });
+}
+
+function dropRecentDocument(databaseId: string, documentId: string) {
+  const key = recentDocumentsStorageKey.value;
+  recentDocuments.value = removeRecentDocument(
+    recentDocuments.value,
+    databaseId,
+    documentId,
+  );
+  if (key) {
+    writeRecentDocumentsToStorage(key, recentDocuments.value);
+  }
+}
+
+function clearRecentDocuments() {
+  const key = recentDocumentsStorageKey.value;
+  recentDocuments.value = [];
+  if (key) {
+    writeRecentDocumentsToStorage(key, recentDocuments.value);
+  }
+  status.value = t("app.status.recentCleared");
+}
+
+async function openRecentDocument(entry: RecentDocumentEntry) {
+  const existingSession = openDocumentSessions.value.find(
+    (candidate) =>
+      candidate.databaseId === entry.databaseId
+      && candidate.documentId === entry.documentId,
+  );
+  if (existingSession) {
+    switchToOpenSession(existingSession.id);
+    return;
+  }
+  try {
+    if (!readableDatabases.value.some((database) => database.id === entry.databaseId)) {
+      throw new Error(t("app.status.recentMissing"));
+    }
+    const database = await openDatabaseById(entry.databaseId);
+    const document = await database.documents.get(entry.documentId);
+    if (!document) {
+      dropRecentDocument(entry.databaseId, entry.documentId);
+      throw new Error(t("app.status.recentMissing"));
+    }
+    selectedDatabaseId.value = entry.databaseId;
+    await loadDocumentIntoEditor(database, entry.databaseId, document);
+    status.value = t("app.status.opened", { id: document.id });
   } catch (error) {
     status.value = error instanceof Error ? error.message : String(error);
   }
@@ -2293,6 +2443,7 @@ async function saveFile() {
       isTemplate.value = savedIsTemplate.value;
       isDirty.value = false;
       snapshotActiveSession();
+      persistCurrentDocumentInRecents();
       status.value = wordReconciled
         ? t("app.status.savedWordReconciled")
         : t("app.status.savedWord");
@@ -2321,6 +2472,7 @@ async function saveFile() {
     }
     isDirty.value = false;
     snapshotActiveSession();
+    persistCurrentDocumentInRecents();
   } catch (error) {
     const database = currentDatabase.value;
     const documentId = currentDocument.value?.id;
@@ -2356,8 +2508,10 @@ async function deleteCurrentDocument() {
   }
   try {
     const deletedDocumentId = currentDocument.value.id;
+    const deletedDatabaseId = currentDatabaseId.value;
     const deletedSessionId = activeDocumentSessionId.value;
     await currentDatabase.value.documents.delete(deletedDocumentId);
+    dropRecentDocument(deletedDatabaseId, deletedDocumentId);
     deleteConfirmVisible.value = false;
     openDocumentSessions.value = openDocumentSessions.value.filter(
       (session) => session.id !== deletedSessionId,
@@ -2536,6 +2690,12 @@ async function loadDocumentIntoEditor(
     openDocumentSessions.value = [...openDocumentSessions.value, nextSession];
   }
   activateSession(nextSession);
+  persistRecentDocument({
+    databaseId,
+    documentId: document.id,
+    title: readSubject(document) || t("common.untitled"),
+    type: readDocumentType(document),
+  });
 }
 
 /**
@@ -2699,15 +2859,25 @@ function formatRevisionDate(timestamp: number) {
           @click="requestRefreshCurrentDocument"
         />
       </div>
-      <button
-        v-if="currentDocument"
-        class="toolbar__document-title"
-        type="button"
-        :disabled="editorReadOnly"
-        @click="openPropertiesDialog"
-      >
-        {{ documentTitle }}
-      </button>
+      <div v-if="currentDocument" class="toolbar__document-tab">
+        <button
+          class="toolbar__document-title"
+          type="button"
+          :title="documentTitle"
+          @click="openPropertiesDialog"
+        >
+          {{ documentTitle }}
+        </button>
+        <button
+          class="toolbar__document-close"
+          type="button"
+          :aria-label="t('app.menu.closeCurrent')"
+          :title="t('app.menu.closeCurrent')"
+          @click="closeOpenSession(activeDocumentSessionId)"
+        >
+          <i class="pi pi-times" aria-hidden="true" />
+        </button>
+      </div>
       <div class="toolbar__meta">
         <Button
           v-if="showSaveChangesButton"
@@ -3057,7 +3227,8 @@ function formatRevisionDate(timestamp: number) {
       v-model:visible="propertiesDialogVisible"
       modal
       :header="t('app.properties.title')"
-      :style="{ width: propertiesIsSealed ? '38rem' : '34rem', maxWidth: '96vw' }"
+      :style="{ width: propertiesIsSealed ? '40rem' : '38rem', maxWidth: '96vw' }"
+      @hide="copiedInfoLabel = null"
     >
       <div class="dialog-content">
         <label class="field">
@@ -3068,7 +3239,7 @@ function formatRevisionDate(timestamp: number) {
             type="text"
             autocomplete="off"
             :placeholder="t('app.properties.titlePlaceholder')"
-            :disabled="propertiesApplying"
+            :disabled="editorReadOnly || propertiesApplying"
           />
         </label>
         <DocumentRecipientsField
@@ -3089,7 +3260,7 @@ function formatRevisionDate(timestamp: number) {
             class="native-input native-input--textarea"
             rows="6"
             :placeholder="t('app.properties.tagsPlaceholder')"
-            :disabled="propertiesApplying"
+            :disabled="editorReadOnly || propertiesApplying"
           />
         </label>
         <p class="field-hint">
@@ -3099,25 +3270,52 @@ function formatRevisionDate(timestamp: number) {
           <input
             v-model="propertiesIsTemplateDraft"
             type="checkbox"
-            :disabled="propertiesApplying"
+            :disabled="editorReadOnly || propertiesApplying"
           />
           <span>{{ t("app.properties.useAsTemplate") }}</span>
         </label>
+        <section class="info-stack">
+          <div class="info-row">
+            <div class="info-copy">
+              <span class="field-label">{{ t("app.info.database") }}</span>
+              <code class="info-value">{{ currentDatabaseLabel }}</code>
+            </div>
+            <Button
+              :label="t('common.copy')"
+              text
+              size="small"
+              :disabled="!currentDatabaseId"
+              @click="copyInfoValue(currentDatabaseId, t('app.info.databaseId'))"
+            />
+          </div>
+          <div class="info-row">
+            <div class="info-copy">
+              <span class="field-label">{{ t("app.info.documentId") }}</span>
+              <code class="info-value">{{ currentDocument?.id ?? "-" }}</code>
+            </div>
+            <Button
+              :label="t('common.copy')"
+              text
+              size="small"
+              :disabled="!currentDocument?.id"
+              @click="copyInfoValue(currentDocument?.id ?? '', t('app.info.documentId'))"
+            />
+          </div>
+        </section>
+        <p v-if="copiedInfoLabel" class="field-hint">{{ copiedInfoLabel }}</p>
       </div>
       <template #footer>
         <Button
-          :label="t('common.cancel')"
+          :label="editorReadOnly ? t('common.close') : t('common.cancel')"
           text
           :disabled="propertiesApplying"
-          @click="
-            propertiesDialogVisible = false;
-            resetPropertiesDraft();
-          "
+          @click="closePropertiesDialog"
         />
         <Button
+          v-if="!editorReadOnly"
           :label="t('common.apply')"
           icon="pi pi-check"
-          :disabled="editorReadOnly || propertiesApplying"
+          :disabled="propertiesApplying"
           :loading="propertiesApplying"
           @click="applyDocumentProperties"
         />
@@ -3200,56 +3398,6 @@ function formatRevisionDate(timestamp: number) {
           icon="pi pi-times"
           severity="warn"
           @click="confirmCloseOpenSession"
-        />
-      </template>
-    </Dialog>
-
-    <Dialog
-      v-model:visible="infoDialogVisible"
-      modal
-      :header="t('app.info.title')"
-      :style="{ width: '32rem', maxWidth: '96vw' }"
-      @hide="copiedInfoLabel = null"
-    >
-      <section class="info-stack">
-        <div class="info-row">
-          <div class="info-copy">
-            <span class="field-label">{{ t("app.info.database") }}</span>
-            <code class="info-value">{{ currentDatabaseLabel }}</code>
-          </div>
-          <Button
-            :label="t('common.copy')"
-            text
-            size="small"
-            :disabled="!currentDatabaseId"
-            @click="copyInfoValue(currentDatabaseId, t('app.info.databaseId'))"
-          />
-        </div>
-
-        <div class="info-row">
-          <div class="info-copy">
-            <span class="field-label">{{ t("app.info.documentId") }}</span>
-            <code class="info-value">{{ currentDocument?.id ?? "-" }}</code>
-          </div>
-          <Button
-            :label="t('common.copy')"
-            text
-            size="small"
-            :disabled="!currentDocument?.id"
-            @click="
-              copyInfoValue(currentDocument?.id ?? '', t('app.info.documentId'))
-            "
-          />
-        </div>
-      </section>
-
-      <p v-if="copiedInfoLabel" class="field-hint">{{ copiedInfoLabel }}</p>
-
-      <template #footer>
-        <Button
-          :label="t('common.close')"
-          text
-          @click="infoDialogVisible = false"
         />
       </template>
     </Dialog>
@@ -3380,11 +3528,28 @@ function formatRevisionDate(timestamp: number) {
   font-size: 0.78rem;
 }
 
-.toolbar__document-title {
+.toolbar__document-tab {
+  display: flex;
+  align-items: center;
   flex: 0 1 min(32rem, 36vw);
   max-width: min(32rem, 36vw);
-  padding: 0.22rem 0.75rem;
+  min-width: 0;
+  padding: 0.08rem 0.18rem 0.08rem 0.35rem;
   border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.toolbar__document-tab:hover,
+.toolbar__document-tab:focus-within {
+  border-color: var(--border-strong);
+  background: rgb(212 160 23 / 0.12);
+}
+
+.toolbar__document-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0.14rem 0.4rem;
+  border: 0;
   border-radius: 999px;
   background: transparent;
   color: var(--text);
@@ -3396,15 +3561,30 @@ function formatRevisionDate(timestamp: number) {
   white-space: nowrap;
 }
 
-.toolbar__document-title:hover:not(:disabled),
-.toolbar__document-title:focus-visible {
-  border-color: var(--border-strong);
-  background: rgb(212 160 23 / 0.12);
-}
-
 .toolbar__document-title:disabled {
   cursor: default;
   opacity: 0.7;
+}
+
+.toolbar__document-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.toolbar__document-close:hover,
+.toolbar__document-close:focus-visible {
+  background: rgb(212 160 23 / 0.22);
+  color: var(--text);
 }
 
 .toolbar__title {
@@ -3496,7 +3676,7 @@ button.toolbar__status-badge:focus-visible {
     backdrop-filter: var(--surface-blur);
   }
 
-  .toolbar__document-title {
+  .toolbar__document-tab {
     max-width: 14rem;
   }
 }
@@ -3885,18 +4065,18 @@ button.toolbar__status-badge:focus-visible {
 
 .info-stack {
   display: grid;
-  gap: 0.85rem;
+  gap: 1rem;
 }
 
 .info-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.85rem 0.95rem;
-  border: 1px solid rgb(255 255 255 / 0.08);
-  border-radius: 0.9rem;
-  background: rgb(255 255 255 / 0.03);
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .info-copy {
