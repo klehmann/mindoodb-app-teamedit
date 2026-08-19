@@ -1,5 +1,5 @@
 import { strFromU8, unzipSync } from "fflate";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MindooDBAppDatabase } from "mindoodb-app-sdk";
 
 import { createAttachmentMarkdownUrl } from "./attachmentImages";
@@ -8,6 +8,7 @@ import {
   createExportFileName,
   createMarkdownPackageBytes,
   rewriteMarkdownAttachmentUrls,
+  saveBlobToDisk,
 } from "./exportMarkdown";
 
 describe("exportMarkdown", () => {
@@ -69,5 +70,83 @@ describe("exportMarkdown", () => {
     expect([...entries["attachments/image.png"]]).toEqual([104, 105]);
     expect(database.attachments.openReadStream).toHaveBeenCalledWith("doc-1", "image.png", { revisionId: "rev-1" });
     expect(close).toHaveBeenCalled();
+  });
+});
+
+describe("saveBlobToDisk", () => {
+  const originalShowSaveFilePicker = (
+    window as Window & { showSaveFilePicker?: unknown }
+  ).showSaveFilePicker;
+  let createObjectURL: ReturnType<typeof vi.fn>;
+  let revokeObjectURL: ReturnType<typeof vi.fn>;
+  let click: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    createObjectURL = vi.fn(() => "blob:download");
+    revokeObjectURL = vi.fn();
+    click = vi.fn();
+    vi.stubGlobal("URL", {
+      createObjectURL,
+      revokeObjectURL,
+    });
+    vi.spyOn(document, "createElement").mockImplementation((tagName: string) => {
+      if (tagName === "a") {
+        return {
+          href: "",
+          download: "",
+          click,
+        } as unknown as HTMLAnchorElement;
+      }
+      return document.createElement(tagName);
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    if (originalShowSaveFilePicker) {
+      Object.defineProperty(window, "showSaveFilePicker", {
+        configurable: true,
+        value: originalShowSaveFilePicker,
+      });
+    } else {
+      delete (window as Window & { showSaveFilePicker?: unknown }).showSaveFilePicker;
+    }
+  });
+
+  it("falls back to an anchor download when the save picker is blocked in an iframe", async () => {
+    Object.defineProperty(window, "showSaveFilePicker", {
+      configurable: true,
+      value: vi.fn(async () => {
+        throw new DOMException(
+          "Failed to execute 'showSaveFilePicker' on 'Window': Cross origin sub frames aren't allowed to show a file picker.",
+          "SecurityError",
+        );
+      }),
+    });
+
+    const saved = await saveBlobToDisk(
+      new Blob(["docx"], { type: "application/octet-stream" }),
+      "notes.docx",
+    );
+
+    expect(saved).toBe(true);
+    expect(click).toHaveBeenCalledOnce();
+    expect(createObjectURL).toHaveBeenCalledOnce();
+  });
+
+  it("does not fall back when the user cancels the save picker", async () => {
+    Object.defineProperty(window, "showSaveFilePicker", {
+      configurable: true,
+      value: vi.fn(async () => {
+        const error = new Error("The user aborted a request.");
+        error.name = "AbortError";
+        throw error;
+      }),
+    });
+
+    const saved = await saveBlobToDisk(new Blob(["docx"]), "notes.docx");
+
+    expect(saved).toBe(false);
+    expect(click).not.toHaveBeenCalled();
   });
 });

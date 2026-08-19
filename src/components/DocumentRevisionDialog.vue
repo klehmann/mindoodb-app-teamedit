@@ -2,6 +2,7 @@
 import { computed, ref, watch } from "vue";
 import Button from "primevue/button";
 import Dialog from "primevue/dialog";
+import { useI18n } from "vue-i18n";
 import type { MindooDBAppDocumentHistoryEntry } from "mindoodb-app-sdk";
 
 const props = defineProps<{
@@ -18,13 +19,14 @@ const emit = defineEmits<{
   cancel: [];
 }>();
 
+const { t, locale } = useI18n();
 const selectedRevisionId = ref<string | null>(null);
 
 const selectedEntry = computed(() =>
   props.entries.find((entry) => entry.revisionId === selectedRevisionId.value) ?? null);
 
 function formatRevisionDate(timestamp: number) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(locale.value, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(new Date(timestamp));
@@ -35,9 +37,9 @@ function authorLabel(entry: MindooDBAppDocumentHistoryEntry) {
 }
 
 function chipLabel(entry: MindooDBAppDocumentHistoryEntry) {
-  if (entry.isCurrent) return "Current revision";
-  if (entry.isDeleted) return "Deleted";
-  return entry.summary ?? "Snapshot";
+  if (entry.isCurrent) return t("revisions.current");
+  if (entry.isDeleted) return t("revisions.deleted");
+  return entry.summary ?? t("revisions.snapshot");
 }
 
 function selectEntry(entry: MindooDBAppDocumentHistoryEntry) {
@@ -87,24 +89,24 @@ watch(
   <Dialog
     :visible="visible"
     modal
-    header="Document revisions"
+    :header="t('revisions.title')"
     :style="{ width: '38rem', maxWidth: '96vw' }"
     @update:visible="handleVisibleChange"
   >
     <div class="revision-dialog">
       <p class="revision-dialog__intro">
-        Pick a saved document revision to open it read-only.
+        {{ t("revisions.intro") }}
       </p>
 
-      <p v-if="loading" class="revision-dialog__state">Loading revisions...</p>
+      <p v-if="loading" class="revision-dialog__state">{{ t("revisions.loading") }}</p>
       <p v-else-if="errorMessage" class="revision-dialog__state revision-dialog__state--error">
         {{ errorMessage }}
       </p>
       <p v-else-if="entries.length === 0" class="revision-dialog__state">
-        No revisions are available for this document.
+        {{ t("revisions.empty") }}
       </p>
 
-      <div v-else class="revision-list" role="listbox" aria-label="Document revisions">
+      <div v-else class="revision-list" role="listbox" :aria-label="t('revisions.listAria')">
         <button
           v-for="entry in entries"
           :key="entry.revisionId"
@@ -130,9 +132,9 @@ watch(
     </div>
 
     <template #footer>
-      <Button label="Cancel" text @click="cancel" />
+      <Button :label="t('common.cancel')" text @click="cancel" />
       <Button
-        label="Open revision"
+        :label="t('revisions.open')"
         icon="pi pi-history"
         :disabled="loading || !selectedEntry"
         @click="confirmSelection"

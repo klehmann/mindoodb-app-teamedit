@@ -1,6 +1,7 @@
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 
+import { i18n } from "@/i18n";
 import DocumentRevisionDialog from "./DocumentRevisionDialog.vue";
 
 const entries = [
@@ -37,6 +38,7 @@ function mountDialog(props = {}) {
       ...props,
     },
     global: {
+      plugins: [i18n],
       stubs: {
         Dialog: {
           template: "<section><slot /><slot name=\"footer\" /></section>",

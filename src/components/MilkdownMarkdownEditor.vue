@@ -3,6 +3,7 @@ import { commandsCtx, editorViewCtx } from "@milkdown/kit/core";
 import { clearTextInCurrentBlockCommand } from "@milkdown/kit/preset/commonmark";
 import { insert } from "@milkdown/kit/utils";
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 
 import type { AttachmentInsertion } from "@/lib/attachmentImages";
 import { escapeHtml } from "@/lib/markdownRendering";
@@ -25,13 +26,13 @@ const emit = defineEmits<{
   "update:modelValue": [value: string];
 }>();
 
+const { t, locale } = useI18n();
 const root = ref<HTMLElement | null>(null);
 let editor: any = null;
 let applyingExternalValue = false;
 let editorGeneration = 0;
 
 const MERMAID_TEMPLATE = "```mermaid\nflowchart TD\n  A[Start] --> B[Next step]\n```";
-const CALLOUT_TEMPLATE = ":::note Note\nWrite callout content here.\n:::";
 const diagramIcon = `
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
     <path d="M4 4h6v6H4V4Zm10 0h6v6h-6V4ZM4 14h6v6H4v-6Zm10 0h6v6h-6v-6ZM8 10h2v2h4v2h2v-2h2v-2h-4V8h-2v2H8v2Z"/>
@@ -114,6 +115,7 @@ async function createEditor() {
   if (!root.value) {
     return;
   }
+  const calloutTemplate = `:::note Note\n${t("editor.calloutPlaceholder")}\n:::`;
   const generation = ++editorGeneration;
   const { Crepe } = await import("@milkdown/crepe");
   if (!root.value || generation !== editorGeneration) {
@@ -128,7 +130,7 @@ async function createEditor() {
           if (!isMermaidLanguage(language)) {
             return null;
           }
-          applyPreview(createMermaidMessageHtml("Loading Mermaid preview..."));
+          applyPreview(createMermaidMessageHtml(t("editor.mermaidLoading")));
           void renderMermaidSvg(content, {
             idPrefix: "teamedit-editor-mermaid",
             convertLabelsToSvgText: true,
@@ -136,9 +138,9 @@ async function createEditor() {
             .then((svg) => {
               applyPreview(`<div class="${MERMAID_PLACEHOLDER_CLASS}">${svg}</div>`);
             })
-            .catch((error) => {
+            .catch(() => {
               applyPreview(createMermaidMessageHtml(
-                error instanceof Error ? error.message : "Unable to render Mermaid diagram.",
+                t("editor.mermaidFailed"),
                 "error",
               ));
             });
@@ -171,15 +173,15 @@ async function createEditor() {
       [Crepe.Feature.BlockEdit]: {
         buildMenu(builder: any) {
           builder.getGroup("advanced").addItem("callout", {
-            label: "Callout",
+            label: t("editor.callout"),
             icon: calloutIcon,
             onRun(ctx: any) {
               ctx.get(commandsCtx).call(clearTextInCurrentBlockCommand.key);
-              insert(CALLOUT_TEMPLATE)(ctx);
+              insert(calloutTemplate)(ctx);
             },
           });
-          builder.addGroup("diagram", "Diagram").addItem("mermaid", {
-            label: "Diagram",
+          builder.addGroup("diagram", t("editor.diagram")).addItem("mermaid", {
+            label: t("editor.diagram"),
             icon: diagramIcon,
             onRun(ctx: any) {
               ctx.get(commandsCtx).call(clearTextInCurrentBlockCommand.key);
@@ -190,8 +192,8 @@ async function createEditor() {
           // attachment without re-uploading it. The picker dialog lives in the
           // host so it can read the document's attachments and resolve image
           // thumbnails with the same resolver the editor uses.
-          builder.addGroup("attachment", "Attachment").addItem("attachment", {
-            label: "Attachment",
+          builder.addGroup("attachment", t("editor.attachment")).addItem("attachment", {
+            label: t("editor.attachment"),
             icon: attachmentIcon,
             onRun: (ctx: any) => {
               ctx.get(commandsCtx).call(clearTextInCurrentBlockCommand.key);
@@ -261,6 +263,10 @@ watch(
     editor?.setReadonly?.(value ?? false);
   },
 );
+
+watch(locale, () => {
+  void recreateEditor();
+});
 
 onBeforeUnmount(async () => {
   editorGeneration += 1;

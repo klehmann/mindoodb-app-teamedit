@@ -6,6 +6,7 @@ import {
 } from "mindoodb-app-sdk";
 
 import { normalizeTags } from "@/lib/documentTags";
+import { t } from "@/i18n";
 
 export const ALL_DOCUMENTS_NODE_KEY = "all";
 export type OpenDocumentTemplateFilter = "all" | "noTemplates" | "onlyTemplates";
@@ -15,6 +16,8 @@ export interface OpenCategoryNode {
   label: string;
   count: number;
   children: OpenCategoryNode[];
+  /** Hierarchical tag path (`Work\Planning`) when this node maps to a real tag. */
+  tag?: string;
 }
 
 export interface OpenDocumentRow {
@@ -86,7 +89,7 @@ export async function collectNavigatorEntries(navigator: MindooDBAppViewNavigato
 export function buildOpenCategoryTree(categoryEntries: MindooDBAppViewEntry[], documentCount: number) {
   const root: OpenCategoryNode = {
     key: ALL_DOCUMENTS_NODE_KEY,
-    label: "All documents",
+    label: t("app.open.allDocuments"),
     count: documentCount,
     children: [],
   };
@@ -97,6 +100,7 @@ export function buildOpenCategoryTree(categoryEntries: MindooDBAppViewEntry[], d
       label: readCategoryLabel(entry),
       count: entry.descendantDocumentCount ?? 0,
       children: [],
+      tag: categoryTagFromPath(entry.categoryPath),
     };
     nodesByKey.set(node.key, node);
   }
@@ -139,13 +143,13 @@ function mapDocumentEntry(entry: MindooDBAppViewEntry) {
     title: readTitle(entry),
     type: readDocumentType(entry),
     tags,
-    detail: tags.join(", ") || "Untagged",
+    detail: tags.join(", ") || t("app.open.untagged"),
   };
 }
 
 function readTitle(entry: MindooDBAppViewEntry) {
   const value = entry.columnValues.subject;
-  return typeof value === "string" && value.trim() ? value : entry.docId ?? "Untitled document";
+  return typeof value === "string" && value.trim() ? value : entry.docId ?? t("common.untitled");
 }
 
 function readDocumentType(entry: MindooDBAppViewEntry): "markdown" | "word" {
@@ -154,5 +158,30 @@ function readDocumentType(entry: MindooDBAppViewEntry): "markdown" | "word" {
 
 function readCategoryLabel(entry: MindooDBAppViewEntry) {
   const value = entry.categoryPath.at(-1);
-  return value == null || value === "" ? "Untagged" : String(value);
+  return value == null || value === "" ? t("app.open.untagged") : String(value);
+}
+
+function categoryTagFromPath(categoryPath: unknown[]) {
+  const parts: string[] = [];
+  for (const part of categoryPath) {
+    if (typeof part !== "string" && typeof part !== "number") {
+      continue;
+    }
+    const value = String(part).trim();
+    if (value) {
+      parts.push(value);
+    }
+  }
+  return parts.length > 0 ? parts.join("\\") : undefined;
+}
+
+/** Categories that represent a real tag path, for the New-document picker. */
+export function usableExistingTagNodes(nodes: OpenCategoryNode[]): OpenCategoryNode[] {
+  return nodes.flatMap((node) => {
+    const children = usableExistingTagNodes(node.children);
+    if (node.tag) {
+      return [{ ...node, children }];
+    }
+    return children;
+  });
 }

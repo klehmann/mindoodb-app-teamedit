@@ -22,6 +22,7 @@ import {
 
 import { parseAttachmentMarkdownUrl } from "@/lib/attachmentImages";
 import { DOCX_MIME_TYPE, createExportFileName, saveBlobToDisk } from "@/lib/exportMarkdown";
+import { t } from "@/i18n";
 import { renderMarkdownFragment, type MarkdownRenderOptions } from "@/lib/markdownRendering";
 import { MERMAID_PLACEHOLDER_CLASS, renderMermaidSvg } from "@/lib/mermaid";
 
@@ -535,7 +536,7 @@ export function collectNonImageAttachmentReferences(markdown: string, attachment
   const linkPattern = /(?<!!)\[([^\]]*)]\((mindoodb-attachment:[^\s)"']+)(?:\s+"[^"]*")?\)/g;
   let match: RegExpExecArray | null;
   while ((match = linkPattern.exec(markdown)) !== null) {
-    const label = match[1]?.trim() || "Attachment";
+    const label = match[1]?.trim() || t("editor.attachment");
     const attachmentName = parseAttachmentMarkdownUrl(match[2]);
     const attachment = attachmentName ? attachmentsByName.get(attachmentName) : undefined;
     if (attachment && !isImageAttachment(attachment)) {
@@ -552,7 +553,7 @@ function createAttachmentAppendix(references: ReturnType<typeof collectNonImageA
   }
 
   return [
-    new Paragraph({ text: "Document attachments", heading: HeadingLevel.HEADING_2 }),
+    new Paragraph({ text: t("app.export.attachmentsHeading"), heading: HeadingLevel.HEADING_2 }),
     ...references.map(({ label, attachment }) =>
       new Paragraph({
         bullet: { level: 0 },
@@ -607,7 +608,7 @@ export async function createDocxExportBlob(options: ExportDocxOptions) {
       creator: "MindooDB TeamEdit",
       sections: [{
         children: [
-          new Paragraph({ text: options.title || "Untitled document", heading: HeadingLevel.TITLE }),
+          new Paragraph({ text: options.title || t("common.untitled"), heading: HeadingLevel.TITLE }),
           ...(content.length > 0 ? content : [emptyParagraph()]),
           ...createAttachmentAppendix(attachmentReferences),
         ],

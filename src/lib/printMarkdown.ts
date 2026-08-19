@@ -1,4 +1,5 @@
 import { applyImageRatios } from "@/lib/imageRatio";
+import { i18n, t } from "@/i18n";
 import highlightStyles from "highlight.js/styles/github.css?inline";
 import katexStyles from "katex/dist/katex.min.css?inline";
 import {
@@ -304,9 +305,9 @@ export interface PrintMarkdownOptions extends MarkdownRenderOptions {
 }
 
 function createPrintDocument(title: string, bodyHtml: string) {
-  const safeTitle = escapeHtml(title.trim() || "Untitled document");
+  const safeTitle = escapeHtml(title.trim() || t("common.untitled"));
   return `<!doctype html>
-<html lang="en">
+<html lang="${i18n.global.locale.value}">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

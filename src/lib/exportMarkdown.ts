@@ -9,6 +9,7 @@ import {
   parseAttachmentMarkdownUrl,
   readAttachmentBlob,
 } from "@/lib/attachmentImages";
+import { t } from "@/i18n";
 
 const MARKDOWN_MIME_TYPE = "text/markdown;charset=utf-8";
 const ZIP_MIME_TYPE = "application/zip";
@@ -46,7 +47,7 @@ export function createExportFileName(title: string, extension: "docx" | "md" | "
     .replace(/[\\/]/g, "-")
     .replace(/[\u0000-\u001f\u007f]/g, "")
     .replace(/\s+/g, " ")
-    .trim() || "Untitled document";
+    .trim() || t("common.untitled");
   return baseName.toLowerCase().endsWith(`.${extension}`) ? baseName : `${baseName}.${extension}`;
 }
 
@@ -59,25 +60,47 @@ function downloadBlobWithAnchor(blob: Blob, fileName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+function isAbortError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "name" in error
+    && (error as { name: string }).name === "AbortError";
+}
+
+/**
+ * Chromium exposes `showSaveFilePicker` inside Haven's cross-origin iframe,
+ * but invoking it throws SecurityError. Skip the picker there and go straight
+ * to the download-anchor fallback.
+ */
+function isSaveFilePickerAllowed(): boolean {
+  try {
+    return window.top == null
+      || window.top === window
+      || window.top.location.origin === window.location.origin;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Saves one generated file.
  *
  * Chromium browsers can show a real save dialog through the File System Access
- * API. Other browsers still get the same file via the traditional download
- * anchor fallback, which is why the app can offer one menu item everywhere.
+ * API. Other browsers, and Haven's cross-origin iframe host, still get the same
+ * file via the traditional download anchor fallback.
  */
 export async function saveBlobToDisk(blob: Blob, fileName: string) {
   const savePicker = (window as SaveFilePickerWindow).showSaveFilePicker;
-  if (savePicker) {
+  if (typeof savePicker === "function" && isSaveFilePickerAllowed()) {
     try {
       const handle = await savePicker({
         suggestedName: fileName,
         types: [{
           description: fileName.endsWith(".zip")
-            ? "ZIP archive"
+            ? t("app.export.zip")
             : fileName.endsWith(".docx")
-              ? "Word document"
-              : "Markdown file",
+              ? t("app.export.docx")
+              : t("app.export.markdown"),
           accept: {
             [blob.type || "application/octet-stream"]: [fileName.slice(fileName.lastIndexOf("."))],
           },
@@ -88,10 +111,11 @@ export async function saveBlobToDisk(blob: Blob, fileName: string) {
       await writable.close();
       return true;
     } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
+      if (isAbortError(error)) {
         return false;
       }
-      throw error;
+      // Present-but-blocked: cross-origin iframe, embedded Chromium, or a
+      // createWritable NotAllowedError. Fall through to an anchor download.
     }
   }
 

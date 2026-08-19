@@ -2,6 +2,7 @@
 import { ref } from "vue";
 import Button from "primevue/button";
 import Dialog from "primevue/dialog";
+import { useI18n } from "vue-i18n";
 import type { MindooDBAppAttachmentInfo } from "mindoodb-app-sdk";
 
 const props = defineProps<{
@@ -23,6 +24,7 @@ const emit = defineEmits<{
   remove: [attachmentName: string];
 }>();
 
+const { t } = useI18n();
 const dragActive = ref(false);
 const dragDepth = ref(0);
 const pendingRemoval = ref<MindooDBAppAttachmentInfo | null>(null);
@@ -111,22 +113,22 @@ function updateRemovalDialogVisible(visible: boolean) {
   >
     <div class="attachments-panel__header">
       <div>
-        <p class="attachments-panel__label">Attachments</p>
+        <p class="attachments-panel__label">{{ t("attachments.title") }}</p>
         <p class="attachments-panel__hint">
           <template v-if="!canUseAttachments">
-            Attachment actions are unavailable for this database binding.
+            {{ t("attachments.unavailable") }}
           </template>
           <template v-else-if="canManageAttachments && !busyAction">
-            Drop files here or use Upload.
+            {{ t("attachments.dropOrUpload") }}
           </template>
-          <template v-else-if="busyAction"> {{ busyAction }}... </template>
+          <template v-else-if="busyAction">
+            {{ t("attachments.busy", { action: busyAction }) }}
+          </template>
           <template v-else-if="historical">
-            Read-only - viewing a historical revision. You can still preview or
-            download files.
+            {{ t("attachments.historical") }}
           </template>
           <template v-else>
-            This app can preview and download attachments, but cannot upload or
-            remove them.
+            {{ t("attachments.readOnly") }}
           </template>
         </p>
       </div>
@@ -147,10 +149,10 @@ function updateRemovalDialogVisible(visible: boolean) {
             :disabled="!canManageAttachments || Boolean(busyAction)"
             @change="handleUpload"
           />
-          <span>Upload</span>
+          <span>{{ t("common.upload") }}</span>
         </label>
         <Button
-          label="Scan document"
+          :label="t('attachments.scan')"
           severity="secondary"
           :disabled="!canManageAttachments || Boolean(busyAction)"
           @click="emit('scan')"
@@ -177,8 +179,8 @@ function updateRemovalDialogVisible(visible: boolean) {
             rounded
             text
             severity="secondary"
-            :aria-label="`Preview ${attachment.fileName}`"
-            :title="`Preview ${attachment.fileName}`"
+            :aria-label="t('attachments.preview', { name: attachment.fileName })"
+            :title="t('attachments.preview', { name: attachment.fileName })"
             :disabled="
               !canUseAttachments ||
               !canPreviewAttachment(attachment.fileName, attachment.mimeType) ||
@@ -191,8 +193,8 @@ function updateRemovalDialogVisible(visible: boolean) {
             rounded
             text
             severity="secondary"
-            :aria-label="`Download ${attachment.fileName}`"
-            :title="`Download ${attachment.fileName}`"
+            :aria-label="t('attachments.download', { name: attachment.fileName })"
+            :title="t('attachments.download', { name: attachment.fileName })"
             :disabled="!canUseAttachments || Boolean(busyAction)"
             @click="emit('download', attachment.fileName)"
           />
@@ -201,8 +203,8 @@ function updateRemovalDialogVisible(visible: boolean) {
             rounded
             text
             severity="danger"
-            :aria-label="`Remove ${attachment.fileName}`"
-            :title="`Remove ${attachment.fileName}`"
+            :aria-label="t('attachments.remove', { name: attachment.fileName })"
+            :title="t('attachments.remove', { name: attachment.fileName })"
             :disabled="!canManageAttachments || Boolean(busyAction)"
             @click="requestRemoval(attachment)"
           />
@@ -210,24 +212,23 @@ function updateRemovalDialogVisible(visible: boolean) {
       </article>
     </div>
     <p v-else class="attachments-panel__empty">
-      No attachments are stored for this document.
+      {{ t("attachments.empty") }}
     </p>
 
     <Dialog
       :visible="Boolean(pendingRemoval)"
       modal
-      header="Remove attachment?"
+      :header="t('attachments.removeTitle')"
       :style="{ width: '28rem', maxWidth: '96vw' }"
       @update:visible="updateRemovalDialogVisible"
     >
       <p>
-        Remove attachment <code>{{ pendingRemoval?.fileName }}</code> from this
-        document?
+        {{ t("attachments.removeBody", { name: pendingRemoval?.fileName }) }}
       </p>
       <template #footer>
-        <Button label="Cancel" text @click="pendingRemoval = null" />
+        <Button :label="t('common.cancel')" text @click="pendingRemoval = null" />
         <Button
-          label="Remove"
+          :label="t('common.remove')"
           icon="pi pi-trash"
           severity="danger"
           :disabled="!canManageAttachments || Boolean(busyAction)"

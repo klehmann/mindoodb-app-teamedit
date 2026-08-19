@@ -38,7 +38,7 @@ export default defineConfig({
     }),
   ],
   optimizeDeps: {
-    include: ["vue", "primevue/config", "primevue/tooltip"],
+    include: ["vue", "vue-i18n", "primevue/config", "primevue/tooltip"],
   },
   resolve: {
     alias: createResolveAliases(),
@@ -49,5 +49,6 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    setupFiles: ["./src/i18n/testSetup.ts"],
   },
 });

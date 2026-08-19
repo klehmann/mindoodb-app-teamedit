@@ -11,6 +11,7 @@ import "primeicons/primeicons.css";
 import "@milkdown/crepe/theme/common/style.css";
 
 import App from "./App.vue";
+import { i18n } from "@/i18n";
 import "@/assets/styles/main.css";
 import { applyAppTheme, buildPrimeVueTheme } from "@/lib/theme";
 import { registerTeamEditServiceWorker } from "@/pwa/appUpdate";
@@ -19,6 +20,7 @@ import { TEAMEDIT_BOOT_COMPLETED_EVENT } from "@/pwa/bootRecovery";
 async function bootstrap() {
   const app = createApp(App);
 
+  app.use(i18n);
   app.use(PrimeVue, {
     ripple: true,
     theme: buildPrimeVueTheme(),

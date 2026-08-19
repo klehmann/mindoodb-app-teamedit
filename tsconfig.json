@@ -8,6 +8,8 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "types": ["node"],
     "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
     "paths": {
       "@/*": ["./src/*"],
       "mindoodb-app-sdk": ["../mindoodb-app-sdk/src/index.ts"],
@@ -15,5 +17,5 @@
       "mindoodb-view-language": ["../mindoodb-view-language/src/index.ts"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.vue", "src/**/*.json", "vite.config.ts"]
 }

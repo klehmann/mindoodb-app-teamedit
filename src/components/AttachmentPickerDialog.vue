@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from "vue";
 import Button from "primevue/button";
 import Checkbox from "primevue/checkbox";
 import Dialog from "primevue/dialog";
+import { useI18n } from "vue-i18n";
 import type { MindooDBAppAttachmentInfo } from "mindoodb-app-sdk";
 
 import {
@@ -39,6 +40,7 @@ const emit = defineEmits<{
   cancel: [];
 }>();
 
+const { t } = useI18n();
 const imagesOnly = ref(true);
 const selectedAttachmentName = ref<string | null>(null);
 const altInputDirty = ref(false);
@@ -73,9 +75,9 @@ const canInsert = computed(() => Boolean(selectedRow.value));
 
 const altInputLabel = computed(() => {
   if (!selectedRow.value) {
-    return "Alt text";
+    return t("picker.altText");
   }
-  return selectedRow.value.isImage ? "Alt text" : "Link label";
+  return selectedRow.value.isImage ? t("picker.altText") : t("picker.linkLabel");
 });
 
 function rebuildRows() {
@@ -214,7 +216,7 @@ function handleVisibleChange(value: boolean) {
   <Dialog
     :visible="visible"
     modal
-    header="Insert attachment"
+    :header="t('picker.title')"
     :style="{ width: '34rem', maxWidth: '96vw' }"
     @update:visible="handleVisibleChange"
   >
@@ -222,10 +224,10 @@ function handleVisibleChange(value: boolean) {
       <div class="picker__filter">
         <label class="picker__filter-control">
           <Checkbox v-model="imagesOnly" :binary="true" inputId="attachment-picker-images-only" />
-          <span>Images only</span>
+          <span>{{ t("picker.imagesOnly") }}</span>
         </label>
         <span class="picker__count">
-          {{ filteredRows.length }} of {{ rows.length }} attachment{{ rows.length === 1 ? "" : "s" }}
+          {{ t("picker.count", { shown: filteredRows.length, total: rows.length }) }}
         </span>
       </div>
 
@@ -260,12 +262,10 @@ function handleVisibleChange(value: boolean) {
       </ul>
       <p v-else class="picker__empty">
         <template v-if="imagesOnly && rows.length">
-          This document has attachments but no image attachments.
-          Untick "Images only" to insert a file link instead.
+          {{ t("picker.noImages") }}
         </template>
         <template v-else>
-          This document has no attachments yet. Upload one in the Attachments
-          panel and try again.
+          {{ t("picker.empty") }}
         </template>
       </p>
 
@@ -282,9 +282,9 @@ function handleVisibleChange(value: boolean) {
     </div>
 
     <template #footer>
-      <Button label="Cancel" text @click="cancel" />
+      <Button :label="t('common.cancel')" text @click="cancel" />
       <Button
-        label="Insert"
+        :label="t('common.insert')"
         icon="pi pi-check"
         :disabled="!canInsert"
         @click="confirm"

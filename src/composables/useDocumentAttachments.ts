@@ -13,6 +13,7 @@ import {
   sanitizeAttachmentFileName,
   uploadFileAttachment,
 } from "@/lib/attachmentImages";
+import { t } from "@/i18n";
 
 export interface UseDocumentAttachmentsOptions {
   database: Ref<MindooDBAppDatabase | null>;
@@ -54,7 +55,7 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
       return;
     }
 
-    busyAction.value = "Uploading attachment";
+    busyAction.value = t("attachments.uploading");
     try {
       for (const file of selectedFiles) {
         await uploadFileAttachment(
@@ -67,13 +68,15 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
       await refreshCurrentDocument();
       uploadInputKey.value += 1;
       options.setStatus(
-        `Uploaded ${selectedFiles.length} attachment${selectedFiles.length === 1 ? "" : "s"}.`,
+        selectedFiles.length === 1
+          ? t("attachments.uploadedOne")
+          : t("attachments.uploadedMany", { count: selectedFiles.length }),
       );
     } catch (error) {
       options.setStatus(
         error instanceof Error
           ? error.message
-          : "The attachment upload failed.",
+          : t("attachments.uploadFailed"),
       );
     } finally {
       busyAction.value = null;
@@ -87,7 +90,7 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
       return;
     }
 
-    busyAction.value = "Scanning attachment";
+    busyAction.value = t("attachments.scanning");
     try {
       const result = await database.attachments.scan(document.id, {
         defaultFileName: `scan-${document.id}.pdf`,
@@ -97,11 +100,11 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
       if (result.ok) {
         await refreshCurrentDocument();
         uploadInputKey.value += 1;
-        options.setStatus("Scanned document attached.");
+        options.setStatus(t("attachments.scanned"));
       }
     } catch (error) {
       options.setStatus(
-        error instanceof Error ? error.message : "The document scan failed.",
+        error instanceof Error ? error.message : t("attachments.scanFailed"),
       );
     } finally {
       busyAction.value = null;
@@ -115,7 +118,7 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
       return;
     }
 
-    busyAction.value = "Opening attachment preview";
+    busyAction.value = t("attachments.openingPreview");
     try {
       const revisionId = options.revisionId?.value ?? undefined;
       await database.attachments.openPreview(
@@ -127,7 +130,7 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
       options.setStatus(
         error instanceof Error
           ? error.message
-          : "The attachment preview could not be opened.",
+          : t("attachments.previewFailed"),
       );
     } finally {
       busyAction.value = null;
@@ -141,7 +144,7 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
       return;
     }
 
-    busyAction.value = "Downloading attachment";
+    busyAction.value = t("attachments.downloading");
     try {
       const attachment = document.attachments?.find(
         (entry) =>
@@ -166,7 +169,7 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
       options.setStatus(
         error instanceof Error
           ? error.message
-          : "The attachment could not be downloaded.",
+          : t("attachments.downloadFailed"),
       );
     } finally {
       busyAction.value = null;
@@ -180,17 +183,17 @@ export function useDocumentAttachments(options: UseDocumentAttachmentsOptions) {
       return;
     }
 
-    busyAction.value = "Removing attachment";
+    busyAction.value = t("attachments.removing");
     try {
       await database.attachments.remove(document.id, attachmentName);
       await refreshCurrentDocument();
       uploadInputKey.value += 1;
-      options.setStatus(`Removed attachment ${attachmentName}.`);
+      options.setStatus(t("attachments.removed", { name: attachmentName }));
     } catch (error) {
       options.setStatus(
         error instanceof Error
           ? error.message
-          : "The attachment could not be removed.",
+          : t("attachments.removeFailed"),
       );
     } finally {
       busyAction.value = null;
