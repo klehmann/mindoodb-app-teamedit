@@ -3,6 +3,7 @@ import { computed, ref } from "vue";
 import Button from "primevue/button";
 import { useI18n } from "vue-i18n";
 import { abbreviateCanonicalName } from "mindoodb-app-sdk";
+import { preferDirectoryUsername, recipientNamesEqual } from "@/lib/sealedRecipients";
 
 const props = defineProps<{
   currentUserName: string;
@@ -16,18 +17,15 @@ const { t } = useI18n();
 const recipientDraft = ref("");
 
 const availableUsers = computed(() => {
-  const excluded = new Set(
-    [props.currentUserCanonical, ...recipients.value]
-      .map((name) => name.trim().toLowerCase())
-      .filter(Boolean),
-  );
+  const excluded = [props.currentUserCanonical, ...recipients.value];
   return props.directoryUsers.filter(
-    (name) => !excluded.has(name.trim().toLowerCase()),
+    (name) => !excluded.some((existing) => recipientNamesEqual(existing, name)),
   );
 });
 
 function displayName(name: string) {
-  return abbreviateCanonicalName(name) || name;
+  const resolved = preferDirectoryUsername(name, props.directoryUsers);
+  return abbreviateCanonicalName(resolved) || resolved;
 }
 
 function addRecipient(name: string) {
@@ -35,11 +33,10 @@ function addRecipient(name: string) {
   if (!trimmed || props.disabled) {
     return;
   }
-  const key = trimmed.toLowerCase();
-  if (key === props.currentUserCanonical.trim().toLowerCase()) {
+  if (recipientNamesEqual(trimmed, props.currentUserCanonical)) {
     return;
   }
-  if (recipients.value.some((existing) => existing.toLowerCase() === key)) {
+  if (recipients.value.some((existing) => recipientNamesEqual(existing, trimmed))) {
     return;
   }
   recipients.value = [...recipients.value, trimmed];

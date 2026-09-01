@@ -46,6 +46,15 @@ export function activeEncryptForUsernames(
     .map(([id, entry]) => entry.label || id.split("#")[0]);
 }
 
+/** Prefer the Directory spelling when it matches a stored `_encryptFor` name. */
+export function preferDirectoryUsername(
+  name: string,
+  directoryUsers: readonly string[],
+): string {
+  const match = directoryUsers.find((user) => recipientNamesEqual(user, name));
+  return match ?? name;
+}
+
 /** Active user readers excluding the author (who is always included). */
 export function extraEncryptForUsernames(
   data: Record<string, unknown> | null | undefined,
