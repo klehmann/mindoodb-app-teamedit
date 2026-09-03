@@ -71,8 +71,8 @@ importers:
         specifier: ^11.14.0
         version: 11.15.0
       mindoodb-app-sdk:
-        specifier: 0.0.31
-        version: 0.0.31(@automerge/automerge@3.2.6)
+        specifier: 0.0.41
+        version: 0.0.41(@automerge/automerge@3.2.6)
       mindoodb-view-language:
         specifier: 0.0.14
         version: 0.0.14
@@ -184,6 +184,9 @@ packages:
 
   '@automerge/automerge@3.2.6':
     resolution: {integrity: sha512-9/GXXfYYWNVGpnbRrGQzTNU4fWZ3XaEMeEg0OrpK4pvlQSpkmUBoirEb/4TMK6BwMysZGV5Yeneq3wwc7RNGfg==}
+
+  '@automerge/automerge@3.4.1':
+    resolution: {integrity: sha512-zsZpbs/iDPvp+ZojIYd+gxmbcPVz2Xbkcx778G8zrt3E0zS+6saHJOm666lOuZyNRlTV4wHw9qzGTKueedeCsQ==}
 
   '@automerge/prosemirror@0.2.0':
     resolution: {integrity: sha512-Mixxftvfs12tKi7DsStobrQxFayoLJXhEjbrnmNnaQbMzwHrUzuwac+OUvw6ujbtXaulWX+JE8hAuHFAGRDsvQ==}
@@ -3237,21 +3240,50 @@ packages:
   micromark@4.0.2:
     resolution: {integrity: sha512-zpe98Q6kvavpCr1NPVSCMebCKfD7CA2NqZ+rykeNhONIJBpc1tFKt9hucLGwha3jNTNI8lHpctWJWoimVF4PfA==}
 
-  mindoodb-app-sdk@0.0.31:
-    resolution: {integrity: sha512-VGdpYWPhB6YFxZXuyjYGqrSn2ruALoiCAHe8KOHIT4EUk7Y54VfHPc5UUus8h6iUEFHBYz05iQ611i4nvMC0nA==}
+  mindoodb-app-sdk@0.0.41:
+    resolution: {integrity: sha512-ifSe+ahOJO5f6Z+4D6W48NTs8VbnsbyckyCQNW2ogqXKIe1pjWdDyhnFwedluhtAVRrOyDE4N6C9sGM7ygfR7Q==}
     engines: {node: '>=22.13.0'}
     peerDependencies:
-      '@automerge/automerge': ^3.2.1
+      '@automerge/automerge': ^3.3.2
+      mindoodb: '>=0.0.57'
     peerDependenciesMeta:
       '@automerge/automerge':
+        optional: true
+      mindoodb:
         optional: true
 
   mindoodb-view-language@0.0.14:
     resolution: {integrity: sha512-3FhCwDOo8snQ2Zw9M4weMbcmxRHtPH6QmgIvywqwMkx6IvxN+S7ksGqAyaEiA6KL4kKoin8dByC+76LLMn1hOw==}
     engines: {node: '>=22.13.0'}
 
+  mindoodb-view-language@0.0.16:
+    resolution: {integrity: sha512-xFgD8YgfcT8AWTLU4WyscUgxrEr1sTWBHf+qqWd+39PMT7bxPoxJrkHcJB5PHO7G8xWLUFG9QYk7HJ9KG+6IVA==}
+    engines: {node: '>=22.13.0'}
+
   mindoodb@0.0.32:
     resolution: {integrity: sha512-+fzUV40LVx+HSZy6YDgV82Mta1+I83is3AQwzDTeE1nMicLzy+ThHase0jtexWMRAi1dDFSSllzYxnkCOx0i7A==}
+    engines: {node: '>=22.13.0'}
+    hasBin: true
+    peerDependencies:
+      expo-standard-web-crypto: ^3.0.0
+      node-forge: ^1.3.1
+      react-native-automerge-generated: ^0.1.0
+      react-native-quick-crypto: ^1.0.0
+      tweetnacl: ^1.0.3
+    peerDependenciesMeta:
+      expo-standard-web-crypto:
+        optional: true
+      node-forge:
+        optional: true
+      react-native-automerge-generated:
+        optional: true
+      react-native-quick-crypto:
+        optional: true
+      tweetnacl:
+        optional: true
+
+  mindoodb@0.0.53:
+    resolution: {integrity: sha512-VzZEM/nJwiiKQLJn+/5Hg+ioitBlpfMFlFqzDazmx5eLentDhFNBa5WABzML1V3pwp05Zxl+GTAqcDm9W7oyHQ==}
     engines: {node: '>=22.13.0'}
     hasBin: true
     peerDependencies:
@@ -3934,6 +3966,10 @@ packages:
     deprecated: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
     hasBin: true
 
+  uuid@11.1.1:
+    resolution: {integrity: sha512-vIYxrBCC/N/K+Js3qSN88go7kIfNPssr/hHCesKCQNAjmgvYS2oqr69kIufEG+O4+PfezOH4EbIeHCfFov8ZgQ==}
+    hasBin: true
+
   uuid@14.0.0:
     resolution: {integrity: sha512-Qo+uWgilfSmAhXCMav1uYFynlQO7fMFiMVZsQqZRMIXp0O7rR7qjkj+cPvBHLgBqi960QCoo/PH2/6ZtVqKvrg==}
     hasBin: true
@@ -4266,6 +4302,8 @@ snapshots:
   '@asamuzakjp/nwsapi@2.3.9': {}
 
   '@automerge/automerge@3.2.6': {}
+
+  '@automerge/automerge@3.4.1': {}
 
   '@automerge/prosemirror@0.2.0':
     dependencies:
@@ -7986,9 +8024,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  mindoodb-app-sdk@0.0.31(@automerge/automerge@3.2.6):
+  mindoodb-app-sdk@0.0.41(@automerge/automerge@3.2.6):
     dependencies:
-      mindoodb-view-language: 0.0.14
+      mindoodb-view-language: 0.0.16
     optionalDependencies:
       '@automerge/automerge': 3.2.6
     transitivePeerDependencies:
@@ -8008,11 +8046,27 @@ snapshots:
       - react-native-quick-crypto
       - tweetnacl
 
+  mindoodb-view-language@0.0.16:
+    dependencies:
+      mindoodb: 0.0.53
+    transitivePeerDependencies:
+      - expo-standard-web-crypto
+      - node-forge
+      - react-native-automerge-generated
+      - react-native-quick-crypto
+      - tweetnacl
+
   mindoodb@0.0.32:
     dependencies:
       '@automerge/automerge': 3.2.6
       minisearch: 7.2.0
       uuid: 10.0.0
+
+  mindoodb@0.0.53:
+    dependencies:
+      '@automerge/automerge': 3.4.1
+      minisearch: 7.2.0
+      uuid: 11.1.1
 
   miniflare@4.20260508.0:
     dependencies:
@@ -8857,6 +8911,8 @@ snapshots:
       which-typed-array: 1.1.20
 
   uuid@10.0.0: {}
+
+  uuid@11.1.1: {}
 
   uuid@14.0.0: {}
 
